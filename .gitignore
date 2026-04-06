@@ -65,5 +65,12 @@ node_modules/
 # dotenv environment variables file
 .env
 
+# Build output
+dist/
+
+# Local agent/tooling metadata
+.agents/
+.claude/
+
 # dataconnect generated files
 .dataconnect
