@@ -23,16 +23,6 @@ export default function OnlineLobby({
           ? t("signedInAs", { name: playerName || authUser.displayName || "Guest" })
           : t("signInToContinue")}
       </p>
-      <div className="lobby-field">
-        <label htmlFor="username">{t("username")}</label>
-        <input
-          id="username"
-          value={playerName}
-          onChange={(event) => onPlayerNameChange(event.target.value)}
-          placeholder={t("usernamePlaceholder")}
-          maxLength={24}
-        />
-      </div>
       <div className="lobby-actions">
         <button type="button" className="primary-button" onClick={onGuestSignIn} disabled={!firebaseReady}>
           {t("guestLogin")}
@@ -41,12 +31,24 @@ export default function OnlineLobby({
           {t("googleLogin")}
         </button>
       </div>
+      {authUser ? (
+        <div className="lobby-field">
+          <label htmlFor="username">{t("username")}</label>
+          <input
+            id="username"
+            value={playerName}
+            onChange={(event) => onPlayerNameChange(event.target.value)}
+            placeholder={t("usernamePlaceholder")}
+            maxLength={24}
+          />
+        </div>
+      ) : null}
       <div className="lobby-actions">
         <button
           type="button"
           className="primary-button"
           onClick={onCreateRoom}
-          disabled={!authUser || !firebaseReady || isCreatingRoom}
+          disabled={!authUser || !firebaseReady || isCreatingRoom || !playerName.trim()}
         >
           {isCreatingRoom ? t("creatingRoom") : t("createRoom")}
         </button>
@@ -61,7 +63,7 @@ export default function OnlineLobby({
           type="button"
           className="secondary-button"
           onClick={onJoinRoom}
-          disabled={!authUser || !firebaseReady || isJoiningRoom}
+          disabled={!authUser || !firebaseReady || isJoiningRoom || !playerName.trim()}
         >
           {isJoiningRoom ? t("joiningRoom") : t("joinRoom")}
         </button>

@@ -168,6 +168,18 @@ export default function GamePage() {
   }, []);
 
   useEffect(() => {
+    if (!authUser) {
+      return;
+    }
+    setPlayerName((current) => {
+      if (current.trim()) {
+        return current;
+      }
+      return authUser.displayName || "";
+    });
+  }, [authUser]);
+
+  useEffect(() => {
     if (!roomCode) {
       return undefined;
     }
@@ -411,16 +423,12 @@ export default function GamePage() {
   }
 
   async function handleGuestSignIn() {
-    if (!ensurePlayerName()) {
-      return;
-    }
+    setStatusMessage("");
     signInGuest().catch((error) => setStatusMessage(error.message));
   }
 
   async function handleGoogleSignIn() {
-    if (!ensurePlayerName()) {
-      return;
-    }
+    setStatusMessage("");
     signInGoogle().catch((error) => setStatusMessage(error.message));
   }
 
