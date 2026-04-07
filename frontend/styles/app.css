@@ -178,11 +178,41 @@ button {
   width: 100%;
   display: grid;
   place-items: center;
+  gap: 14px;
+}
+
+.game-toolbar {
+  width: min(96vw, 1120px);
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: 12px;
+}
+
+.toolbar-group {
+  display: flex;
+  gap: 10px;
+}
+
+.toolbar-group-center {
+  justify-content: center;
+}
+
+.toolbar-group:last-child {
+  justify-content: flex-end;
+}
+
+.game-board-row {
+  width: min(96vw, 1120px);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 14px;
 }
 
 .board-stage {
   position: relative;
-  width: min(96vw, 920px);
+  width: 100%;
 }
 
 .board-shell {
@@ -324,27 +354,7 @@ button {
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
 }
 
-.hud-group {
-  position: absolute;
-  top: 16px;
-  display: flex;
-  gap: 10px;
-  z-index: 4;
-}
-
-.hud-left {
-  left: 16px;
-}
-
-.hud-right {
-  right: 16px;
-}
-
 .status-ribbon {
-  position: absolute;
-  left: 16px;
-  right: 96px;
-  bottom: 16px;
   display: flex;
   justify-content: center;
   gap: 12px;
@@ -352,21 +362,22 @@ button {
   border-radius: 999px;
   background: rgba(9, 12, 17, 0.82);
   color: #fff;
-  z-index: 4;
   box-shadow: 0 10px 28px rgba(0, 0, 0, 0.3);
 }
 
+.side-controls {
+  display: grid;
+  justify-items: center;
+  gap: 12px;
+}
+
 .ability-fab {
-  position: absolute;
-  right: 16px;
-  bottom: 16px;
   width: 68px;
   height: 68px;
   display: grid;
   place-items: center;
   background: rgba(9, 12, 17, 0.9);
   color: #f3ede2;
-  z-index: 5;
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
 }
 
@@ -391,16 +402,20 @@ button {
 }
 
 .ability-hint {
-  position: absolute;
-  left: 50%;
-  bottom: 88px;
-  transform: translateX(-50%);
-  max-width: min(88vw, 440px);
+  max-width: 180px;
   padding: 10px 14px;
-  border-radius: 999px;
+  border-radius: 18px;
   background: rgba(9, 12, 17, 0.84);
   text-align: center;
-  z-index: 4;
+}
+
+.side-note {
+  min-width: 52px;
+  padding: 8px 12px;
+  border-radius: 999px;
+  background: rgba(9, 12, 17, 0.82);
+  text-align: center;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.3);
 }
 
 .event-toast {
@@ -481,13 +496,38 @@ button {
     align-items: stretch;
   }
 
+  .game-toolbar,
+  .game-board-row {
+    width: 100%;
+  }
+
+  .game-toolbar {
+    grid-template-columns: 1fr;
+    justify-items: stretch;
+  }
+
+  .toolbar-group,
+  .toolbar-group:last-child,
+  .toolbar-group-center {
+    justify-content: center;
+  }
+
+  .game-board-row {
+    grid-template-columns: 1fr;
+  }
+
+  .side-controls {
+    grid-template-columns: auto auto 1fr;
+    align-items: center;
+    justify-items: start;
+  }
+
   .board-stage,
   .board-grid {
     width: 100%;
   }
 
   .status-ribbon {
-    right: 84px;
     padding: 10px 14px;
     font-size: 0.9rem;
   }
@@ -511,17 +551,13 @@ button {
     border-radius: 22px;
   }
 
-  .hud-group {
-    top: 10px;
+  .game-toolbar {
+    gap: 10px;
+  }
+
+  .toolbar-group {
     gap: 8px;
-  }
-
-  .hud-left {
-    left: 10px;
-  }
-
-  .hud-right {
-    right: 10px;
+    flex-wrap: wrap;
   }
 
   .hud-button {
@@ -531,19 +567,11 @@ button {
   }
 
   .status-ribbon {
-    left: 10px;
-    right: 76px;
-    bottom: 10px;
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 2px;
     border-radius: 18px;
     font-size: 0.8rem;
   }
 
   .ability-fab {
-    right: 10px;
-    bottom: 10px;
     width: 56px;
     height: 56px;
   }
@@ -559,8 +587,7 @@ button {
   }
 
   .ability-hint {
-    bottom: 74px;
-    max-width: calc(100vw - 28px);
+    max-width: none;
     font-size: 0.82rem;
   }
 }

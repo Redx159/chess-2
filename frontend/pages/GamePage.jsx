@@ -466,7 +466,7 @@ export default function GamePage() {
     ? t("drawOffered", { color: t(state.drawOfferBy) })
     : waitingForOpponent
       ? t("waitingForOpponent", { code: roomCode })
-      : roomCode || "";
+      : "";
   const rematchLabel =
     mode === "online" ? (playerRematchVoted ? t("rematchVoted") : t("voteRematch")) : t("rematch");
   const rematchHint =
@@ -557,19 +557,8 @@ export default function GamePage() {
             </div>
           ) : null}
 
-          <div className="board-stage">
-            <Board
-              state={state}
-              perspective={perspective}
-              selectedPieceId={selectedPieceId}
-              lastMoveSquares={lastMoveSquares}
-              moveTargets={moveTargets}
-              abilityTargets={abilityTargets}
-              visibleSquares={visibleSquares}
-              onSquareClick={handleSquareClick}
-            />
-
-            <div className="hud-group hud-left">
+          <div className="game-toolbar">
+            <div className="toolbar-group">
               <ActionButton label="←" onClick={() => resetToLobby(mode)} title={t("backToLobby")} />
               {mode === "local" ? (
                 <ActionButton
@@ -581,7 +570,11 @@ export default function GamePage() {
               ) : null}
             </div>
 
-            <div className="hud-group hud-right">
+            <div className="toolbar-group toolbar-group-center">
+              {inGameStatus ? <div className="status-ribbon">{inGameStatus}</div> : null}
+            </div>
+
+            <div className="toolbar-group">
               <ActionButton
                 label={pendingDrawFromOpponent ? t("acceptDraw") : t("callDraw")}
                 onClick={handleDrawAction}
@@ -594,34 +587,48 @@ export default function GamePage() {
                 tone="danger"
               />
             </div>
+          </div>
 
-            <div className="status-ribbon">
-              {inGameStatus ? <span>{inGameStatus}</span> : null}
-              {mode === "online" && state.winner && rematchVotesCount > 0 ? (
-                <span>{`${rematchVotesCount}/2`}</span>
-              ) : null}
+          <div className="game-board-row">
+            <div className="board-stage">
+            <Board
+              state={state}
+              perspective={perspective}
+              selectedPieceId={selectedPieceId}
+              lastMoveSquares={lastMoveSquares}
+              moveTargets={moveTargets}
+              abilityTargets={abilityTargets}
+              visibleSquares={visibleSquares}
+              onSquareClick={handleSquareClick}
+            />
             </div>
 
-            <button
-              type="button"
-              className={`ability-fab ${abilityMode ? "active" : ""}`}
-              onClick={() => setAbilityMode((current) => !current)}
-              disabled={!selectedPiece || !abilityReady || Boolean(state.winner)}
-              title={
-                abilityMode
-                  ? t("cancelAbility")
-                  : selectedPiece
-                    ? t("useAbility")
-                    : t("abilityUnavailable")
-              }
-            >
-              <span className="ability-icon">{abilitySymbol}</span>
-              {abilityCooldown > 0 ? <span className="ability-cooldown">{abilityCooldown}</span> : null}
-            </button>
+            <div className="side-controls">
+              <button
+                type="button"
+                className={`ability-fab ${abilityMode ? "active" : ""}`}
+                onClick={() => setAbilityMode((current) => !current)}
+                disabled={!selectedPiece || !abilityReady || Boolean(state.winner)}
+                title={
+                  abilityMode
+                    ? t("cancelAbility")
+                    : selectedPiece
+                      ? t("useAbility")
+                      : t("abilityUnavailable")
+                }
+              >
+                <span className="ability-icon">{abilitySymbol}</span>
+                {abilityCooldown > 0 ? <span className="ability-cooldown">{abilityCooldown}</span> : null}
+              </button>
 
-            {state.pendingAbility?.type === "knight" ? (
-              <div className="ability-hint">{t("knightAbilityHint")}</div>
-            ) : null}
+              {mode === "online" && state.winner && rematchVotesCount > 0 ? (
+                <div className="side-note">{`${rematchVotesCount}/2`}</div>
+              ) : null}
+
+              {state.pendingAbility?.type === "knight" ? (
+                <div className="ability-hint">{t("knightAbilityHint")}</div>
+              ) : null}
+            </div>
           </div>
         </main>
       )}

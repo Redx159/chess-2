@@ -17,7 +17,7 @@ export const translations = {
     startLocalHint: "Start a same-device match to reveal the board.",
     onlineHint: "Create a room or join one with a code to start playing.",
     firebaseMissing:
-      "Online mode is disabled in this deployment because the Firebase VITE_* environment variables were not available at build time.",
+      "Online mode is disabled in this deployment. Add the Firebase VITE_* environment variables in your hosting provider settings, then rebuild and redeploy.",
     signedInAs: "Signed in as {name}",
     signInToContinue: "Sign in to create or join rooms.",
     username: "Username",
@@ -91,7 +91,7 @@ export const translations = {
     startLocalHint: "Lancez une partie sur le meme appareil pour afficher le plateau.",
     onlineHint: "Creez une salle ou rejoignez-en une avec un code.",
     firebaseMissing:
-      "Le mode en ligne est desactive dans ce deploiement car les variables Firebase VITE_* n'etaient pas disponibles pendant le build.",
+      "Le mode en ligne est desactive dans ce deploiement. Ajoutez les variables Firebase VITE_* dans les parametres de votre hebergeur, puis relancez le build et le deploiement.",
     signedInAs: "Connecte en tant que {name}",
     signInToContinue: "Connectez-vous pour creer ou rejoindre des salles.",
     username: "Pseudo",
