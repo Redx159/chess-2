@@ -1,3 +1,22 @@
+import whiteKing from "../../assets/white_king.png";
+import whiteQueen from "../../assets/white_queen.png";
+import whiteRook from "../../assets/white_rook.png";
+import whiteBishop from "../../assets/white_bishop.png";
+import whiteKnight from "../../assets/white_knight.png";
+import whitePawn from "../../assets/white_pawn.png";
+import blackKing from "../../assets/black_king.png";
+import blackQueen from "../../assets/black_queen.png";
+import blackRook from "../../assets/black_rook.png";
+import blackBishop from "../../assets/black_bishop.png";
+import blackKnight from "../../assets/black_knight.png";
+import blackPawn from "../../assets/black_pawn.png";
+import pawnAbility from "../../assets/pawn_ability.png";
+import rookAbility from "../../assets/rook_png.png";
+import knightAbility from "../../assets/knight_ability.png";
+import bishopAbility from "../../assets/bishop_abillity.png";
+import queenAbility from "../../assets/queen_ability.png";
+import kingAbility from "../../assets/king_ability.png";
+
 export const BOARD_SIZE = 8;
 
 export const FILES = ["a", "b", "c", "d", "e", "f", "g", "h"];
@@ -21,6 +40,34 @@ export const PIECE_LABELS = {
     knight: "♞",
     pawn: "♟",
   },
+};
+
+export const PIECE_IMAGE_ASSETS = {
+  white: {
+    king: whiteKing,
+    queen: whiteQueen,
+    rook: whiteRook,
+    bishop: whiteBishop,
+    knight: whiteKnight,
+    pawn: whitePawn,
+  },
+  black: {
+    king: blackKing,
+    queen: blackQueen,
+    rook: blackRook,
+    bishop: blackBishop,
+    knight: blackKnight,
+    pawn: blackPawn,
+  },
+};
+
+export const ABILITY_IMAGE_ASSETS = {
+  pawn: pawnAbility,
+  rook: rookAbility,
+  knight: knightAbility,
+  bishop: bishopAbility,
+  queen: queenAbility,
+  king: kingAbility,
 };
 
 export const ABILITY_COOLDOWNS = {

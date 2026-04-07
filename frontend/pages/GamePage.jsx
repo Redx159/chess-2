@@ -4,8 +4,14 @@ import Board from "../components/Board";
 import OnlineLobby from "../components/OnlineLobby";
 import PromotionModal from "../components/PromotionModal";
 import { auth, hasFirebaseConfig, signInGoogle, signInGuest } from "../../backend/firebase";
-import { createRoom, joinRoom, subscribeToRoom, updateRoomState } from "../../backend/gameService";
-import { PIECE_LABELS } from "../gameLogic/constants";
+import {
+  createRoom,
+  joinRoom,
+  subscribeToMatchHistory,
+  subscribeToRoom,
+  updateRoomState,
+} from "../../backend/gameService";
+import { ABILITY_IMAGE_ASSETS } from "../gameLogic/constants";
 import {
   applyAbility,
   applyMove,
@@ -144,6 +150,7 @@ export default function GamePage() {
   const [roomCodeInput, setRoomCodeInput] = useState("");
   const [roomData, setRoomData] = useState(null);
   const [playerSeat, setPlayerSeat] = useState(null);
+  const [historyEntries, setHistoryEntries] = useState([]);
   const [playerName, setPlayerName] = useState(() => {
     if (typeof window === "undefined") {
       return "";
@@ -195,6 +202,36 @@ export default function GamePage() {
   }, [roomCode]);
 
   useEffect(() => {
+    if (!authUser || !hasFirebaseConfig) {
+      setHistoryEntries([]);
+      return undefined;
+    }
+    return subscribeToMatchHistory(
+      authUser.uid,
+      (entries) => {
+        setHistoryEntries(
+          entries.map((entry) => {
+            const isWhite = entry.players?.white?.uid === authUser.uid;
+            const opponent = isWhite ? entry.players?.black : entry.players?.white;
+            const resultLabel =
+              entry.winner === "draw"
+                ? t("resultDrawShort")
+                : entry.winner === (isWhite ? "white" : "black")
+                  ? t("resultWin")
+                  : t("resultLoss");
+            return {
+              id: entry.id,
+              opponentName: t("against", { name: opponent?.name || "Guest" }),
+              resultLabel,
+            };
+          }),
+        );
+      },
+      (error) => setStatusMessage(error.message),
+    );
+  }, [authUser, t]);
+
+  useEffect(() => {
     if (state.pendingAbility?.type === "knight") {
       setSelectedPieceId(state.pendingAbility.pieceId);
       setAbilityMode(true);
@@ -242,7 +279,7 @@ export default function GamePage() {
   const showBoard = (mode === "local" && localGameStarted) || onlineGameReady;
   const actorColor = mode === "online" ? playerColor : state.currentTurn;
   const abilityCooldown = selectedPiece ? state.cooldowns[selectedPiece.color][selectedPiece.type] : 0;
-  const abilitySymbol = selectedPiece ? PIECE_LABELS[selectedPiece.color][selectedPiece.type] : "✦";
+  const abilityIcon = selectedPiece ? ABILITY_IMAGE_ASSETS[selectedPiece.type] : null;
   const waitingForOpponent = mode === "online" && roomCode && !onlineGameReady;
   const pendingDrawFromOpponent = Boolean(
     actorColor && state.drawOfferBy && state.drawOfferBy !== actorColor,
@@ -479,6 +516,8 @@ export default function GamePage() {
     mode === "online" ? (playerRematchVoted ? t("rematchVoted") : t("voteRematch")) : t("rematch");
   const rematchHint =
     mode === "online" && state.winner && rematchVotesCount > 0 ? t("rematchPending") : "";
+  const whitePlayerName = roomData?.players?.white?.name || t("white");
+  const blackPlayerName = roomData?.players?.black?.name || t("black");
 
   return (
     <div className={`app-shell ${showBoard ? "in-game-shell" : ""}`}>
@@ -523,6 +562,7 @@ export default function GamePage() {
               statusMessage={statusMessage}
               isCreatingRoom={isCreatingRoom}
               isJoiningRoom={isJoiningRoom}
+              historyEntries={historyEntries}
             />
           ) : null}
 
@@ -579,6 +619,14 @@ export default function GamePage() {
             </div>
 
             <div className="toolbar-group toolbar-group-center">
+              <div className="players-ribbon">
+                <span className={`player-pill ${state.currentTurn === "white" ? "active" : ""}`}>
+                  {whitePlayerName}
+                </span>
+                <span className={`player-pill ${state.currentTurn === "black" ? "active" : ""}`}>
+                  {blackPlayerName}
+                </span>
+              </div>
               {inGameStatus ? <div className="status-ribbon">{inGameStatus}</div> : null}
             </div>
 
@@ -614,7 +662,7 @@ export default function GamePage() {
             <div className="side-controls">
               <button
                 type="button"
-                className={`ability-fab ${abilityMode ? "active" : ""}`}
+                className={`ability-fab ${abilityMode ? "active" : ""} ${selectedPiece ? `ability-${selectedPiece.type}` : ""}`}
                 onClick={() => setAbilityMode((current) => !current)}
                 disabled={!selectedPiece || !abilityReady || Boolean(state.winner)}
                 title={
@@ -625,7 +673,11 @@ export default function GamePage() {
                       : t("abilityUnavailable")
                 }
               >
-                <span className="ability-icon">{abilitySymbol}</span>
+                {abilityIcon ? (
+                  <img className="ability-icon-image" src={abilityIcon} alt={selectedPiece?.type || "ability"} />
+                ) : (
+                  <span className="ability-icon">✦</span>
+                )}
                 {abilityCooldown > 0 ? <span className="ability-cooldown">{abilityCooldown}</span> : null}
               </button>
 

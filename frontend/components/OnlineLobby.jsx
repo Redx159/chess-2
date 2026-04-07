@@ -13,6 +13,7 @@ export default function OnlineLobby({
   statusMessage,
   isCreatingRoom,
   isJoiningRoom,
+  historyEntries,
 }) {
   return (
     <section className="lobby-card">
@@ -69,6 +70,23 @@ export default function OnlineLobby({
         </button>
       </div>
       {statusMessage ? <p className="muted">{statusMessage}</p> : null}
+      {authUser ? (
+        <div className="history-panel">
+          <h3>{t("historyTitle")}</h3>
+          {historyEntries.length ? (
+            <div className="history-list">
+              {historyEntries.map((entry) => (
+                <div key={entry.id} className="history-item">
+                  <p>{entry.opponentName}</p>
+                  <p className="muted">{entry.resultLabel}</p>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="muted">{t("historyEmpty")}</p>
+          )}
+        </div>
+      ) : null}
     </section>
   );
 }

@@ -1,20 +1,28 @@
 import {
+  collection,
   doc,
   getDoc,
   onSnapshot,
+  query,
   runTransaction,
   serverTimestamp,
   setDoc,
   updateDoc,
+  where,
 } from "firebase/firestore";
 import { db } from "./firebase";
 import { deserializeState, serializeState } from "../frontend/gameLogic/engine";
 
 const COLLECTION = "arcaneChessRooms";
+const HISTORY_COLLECTION = "arcaneChessHistory";
 const FIRESTORE_TIMEOUT_MS = 12000;
 
 function roomRef(code) {
   return doc(db, COLLECTION, code);
+}
+
+function historyCollectionRef() {
+  return collection(db, HISTORY_COLLECTION);
 }
 
 function withTimeout(promise, message) {
@@ -63,6 +71,7 @@ export async function createRoom(initialState, user, preferredName) {
         },
         [guestSeat]: null,
       },
+      historySaved: false,
       status: "waiting",
       state: serializeState(initialState),
     }),
@@ -135,11 +144,45 @@ export async function updateRoomState(code, nextState) {
   if (!db) {
     throw new Error("Firebase is not configured.");
   }
+  const ref = roomRef(code.toUpperCase());
+  const serializedState = serializeState(nextState);
   await withTimeout(
-    updateDoc(roomRef(code.toUpperCase()), {
-      state: serializeState(nextState),
-      status: nextState.winner ? "finished" : "active",
-      updatedAt: serverTimestamp(),
+    runTransaction(db, async (transaction) => {
+      const snapshot = await transaction.get(ref);
+      if (!snapshot.exists()) {
+        throw new Error("Room not found.");
+      }
+
+      const room = snapshot.data();
+      const status = nextState.winner ? "finished" : "active";
+      const payload = {
+        state: serializedState,
+        status,
+        updatedAt: serverTimestamp(),
+        historySaved: false,
+      };
+
+      if (nextState.winner && !room.historySaved) {
+        const historyDoc = doc(historyCollectionRef());
+        transaction.update(ref, {
+          ...payload,
+          historySaved: true,
+        });
+        transaction.set(historyDoc, {
+          roomCode: code.toUpperCase(),
+          players: room.players,
+          participants: Object.values(room.players)
+            .filter(Boolean)
+            .map((player) => player.uid),
+          winner: nextState.winner,
+          endReason: nextState.endReason || "capture",
+          turnCount: nextState.turnCount,
+          finishedAt: serverTimestamp(),
+        });
+        return;
+      }
+
+      transaction.update(ref, payload);
     }),
     "Firestore timed out while syncing the match state.",
   );
@@ -161,6 +204,30 @@ export function subscribeToRoom(code, callback, onError) {
         ...data,
         state: deserializeState(data.state),
       });
+    },
+    onError,
+  );
+}
+
+export function subscribeToMatchHistory(uid, callback, onError) {
+  if (!db) {
+    throw new Error("Firebase is not configured.");
+  }
+  const historyQuery = query(historyCollectionRef(), where("participants", "array-contains", uid));
+  return onSnapshot(
+    historyQuery,
+    (snapshot) => {
+      const entries = snapshot.docs
+        .map((docSnapshot) => ({
+          id: docSnapshot.id,
+          ...docSnapshot.data(),
+        }))
+        .sort((first, second) => {
+          const firstTime = first.finishedAt?.seconds || 0;
+          const secondTime = second.finishedAt?.seconds || 0;
+          return secondTime - firstTime;
+        });
+      callback(entries);
     },
     onError,
   );

@@ -1,4 +1,4 @@
-import { PIECE_LABELS } from "../gameLogic/constants";
+import { PIECE_IMAGE_ASSETS } from "../gameLogic/constants";
 import { getPieceState } from "../gameLogic/engine";
 import { toSquareKey } from "../gameLogic/helpers";
 
@@ -34,7 +34,12 @@ function Square({
     <button type="button" className={classes} onClick={() => onClick(square)}>
       {isVisible && piece ? (
         <span className={`piece ${piece.color} ${piece.status.explosive ? "explosive" : ""}`}>
-          {PIECE_LABELS[piece.color][piece.type]}
+          <img
+            className="piece-image"
+            src={PIECE_IMAGE_ASSETS[piece.color][piece.type]}
+            alt={`${piece.color} ${piece.type}`}
+            draggable="false"
+          />
         </span>
       ) : (
         <span className="piece-hidden" />
