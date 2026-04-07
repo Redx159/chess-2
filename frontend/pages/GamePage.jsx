@@ -7,6 +7,7 @@ import { auth, hasFirebaseConfig, signInGoogle, signInGuest } from "../../backen
 import {
   createRoom,
   joinRoom,
+  leaveFinishedRoom,
   subscribeToMatchHistory,
   subscribeToRoom,
   updateRoomState,
@@ -151,6 +152,7 @@ export default function GamePage() {
   const [roomData, setRoomData] = useState(null);
   const [playerSeat, setPlayerSeat] = useState(null);
   const [historyEntries, setHistoryEntries] = useState([]);
+  const [opponentLeftAfterGame, setOpponentLeftAfterGame] = useState(false);
   const [playerName, setPlayerName] = useState(() => {
     if (typeof window === "undefined") {
       return "";
@@ -159,7 +161,10 @@ export default function GamePage() {
   });
   const [isCreatingRoom, setIsCreatingRoom] = useState(false);
   const [isJoiningRoom, setIsJoiningRoom] = useState(false);
+  const [pendingActionConfirm, setPendingActionConfirm] = useState(null);
   const previousEventKeyRef = useRef(null);
+  const eventToastTimeoutRef = useRef(null);
+  const pendingConfirmTimeoutRef = useRef(null);
 
   useEffect(() => {
     if (typeof window !== "undefined") {
@@ -188,6 +193,7 @@ export default function GamePage() {
 
   useEffect(() => {
     if (!roomCode) {
+      setOpponentLeftAfterGame(false);
       return undefined;
     }
     const unsubscribe = subscribeToRoom(
@@ -195,11 +201,18 @@ export default function GamePage() {
       (data) => {
         setRoomData(data);
         setState(data.state);
+        if (data.postGameExitBy && data.postGameExitBy !== authUser?.uid && data.state?.winner) {
+          setOpponentLeftAfterGame(true);
+          clearPendingConfirm();
+          setStatusMessage(t("opponentLeftLobby"));
+        } else {
+          setOpponentLeftAfterGame(false);
+        }
       },
       (error) => setStatusMessage(error.message),
     );
     return unsubscribe;
-  }, [roomCode]);
+  }, [authUser?.uid, roomCode, t]);
 
   useEffect(() => {
     if (!authUser || !hasFirebaseConfig) {
@@ -246,15 +259,33 @@ export default function GamePage() {
     const eventKey = state.activeEvent
       ? `${state.activeEvent.type}-${state.activeEvent.startedOnTurn ?? "manual"}`
       : null;
+    if (eventToastTimeoutRef.current) {
+      window.clearTimeout(eventToastTimeoutRef.current);
+      eventToastTimeoutRef.current = null;
+    }
     if (eventKey && eventKey !== previousEventKeyRef.current) {
       setEventToast(eventMessageFor(t, state.activeEvent));
-      const timeoutId = window.setTimeout(() => setEventToast(null), 3200);
+      eventToastTimeoutRef.current = window.setTimeout(() => {
+        setEventToast(null);
+        eventToastTimeoutRef.current = null;
+      }, 3200);
       previousEventKeyRef.current = eventKey;
-      return () => window.clearTimeout(timeoutId);
     }
     previousEventKeyRef.current = eventKey;
     return undefined;
   }, [state.activeEvent, t]);
+
+  useEffect(
+    () => () => {
+      if (eventToastTimeoutRef.current) {
+        window.clearTimeout(eventToastTimeoutRef.current);
+      }
+      if (pendingConfirmTimeoutRef.current) {
+        window.clearTimeout(pendingConfirmTimeoutRef.current);
+      }
+    },
+    [],
+  );
 
   const playerColor = useMemo(
     () => playerSeat || detectPlayerColor(roomData, authUser),
@@ -301,12 +332,38 @@ export default function GamePage() {
     setAbilityMode(false);
   }
 
-  function resetToLobby(nextMode = mode) {
+  function clearPendingConfirm() {
+    setPendingActionConfirm(null);
+    if (pendingConfirmTimeoutRef.current) {
+      window.clearTimeout(pendingConfirmTimeoutRef.current);
+      pendingConfirmTimeoutRef.current = null;
+    }
+  }
+
+  function startPendingConfirm(action) {
+    clearPendingConfirm();
+    setPendingActionConfirm(action);
+    pendingConfirmTimeoutRef.current = window.setTimeout(() => {
+      setPendingActionConfirm(null);
+      pendingConfirmTimeoutRef.current = null;
+    }, 2600);
+  }
+
+  async function resetToLobby(nextMode = mode) {
+    if (nextMode === "online" && roomCode && authUser?.uid && state.winner) {
+      try {
+        await leaveFinishedRoom(roomCode, authUser.uid);
+      } catch (error) {
+        console.error("Leave room failed", error);
+      }
+    }
     clearSelection();
     setEventToast(null);
+    clearPendingConfirm();
     setStatusMessage("");
     setState(createInitialState());
     setRoomData(null);
+    setOpponentLeftAfterGame(false);
     setRoomCode("");
     setRoomCodeInput("");
     setPlayerSeat(null);
@@ -355,6 +412,7 @@ export default function GamePage() {
     if (selectedPieceId && abilityMode) {
       const nextState = applyAbility(state, selectedPieceId, square);
       if (nextState !== state) {
+        clearPendingConfirm();
         await commitState(nextState);
         return;
       }
@@ -366,6 +424,7 @@ export default function GamePage() {
     if (selectedPieceId && !abilityMode) {
       const nextState = applyMove(state, selectedPieceId, square);
       if (nextState !== state) {
+        clearPendingConfirm();
         await commitState(nextState);
         return;
       }
@@ -416,6 +475,7 @@ export default function GamePage() {
       setRoomCode(createdRoom.code);
       setPlayerSeat(createdRoom.assignedSeat);
       setRoomData(createdRoom);
+      setOpponentLeftAfterGame(false);
       setState(initialState);
       setStatusMessage(
         t("roomCreated", {
@@ -449,6 +509,7 @@ export default function GamePage() {
       setRoomCode(normalizedCode);
       setPlayerSeat(joinedRoom.assignedSeat);
       setRoomData(joinedRoom);
+      setOpponentLeftAfterGame(false);
       setState(joinedRoom.state);
       setStatusMessage(t("joinedRoom", { code: normalizedCode }));
     } catch (error) {
@@ -470,11 +531,21 @@ export default function GamePage() {
   }
 
   async function handleResign() {
+    if (pendingActionConfirm !== "resign") {
+      startPendingConfirm("resign");
+      return;
+    }
+    clearPendingConfirm();
     const nextState = resignGame(state, actorColor);
     await commitState(nextState);
   }
 
   async function handleDrawAction() {
+    if (pendingActionConfirm !== "draw") {
+      startPendingConfirm("draw");
+      return;
+    }
+    clearPendingConfirm();
     const nextState = offerOrAcceptDraw(state, actorColor);
     await commitState(nextState);
   }
@@ -492,10 +563,12 @@ export default function GamePage() {
   async function handleRematch() {
     clearSelection();
     setEventToast(null);
+    clearPendingConfirm();
     if (mode === "local") {
       const nextState = createInitialState();
       setLocalHistory([]);
       setLocalGameStarted(true);
+      setOpponentLeftAfterGame(false);
       setState(nextState);
       return;
     }
@@ -518,6 +591,16 @@ export default function GamePage() {
     mode === "online" && state.winner && rematchVotesCount > 0 ? t("rematchPending") : "";
   const whitePlayerName = roomData?.players?.white?.name || t("white");
   const blackPlayerName = roomData?.players?.black?.name || t("black");
+  const opponentLeftLobby = Boolean(state.winner && opponentLeftAfterGame);
+  const drawButtonLabel =
+    pendingActionConfirm === "draw"
+      ? t("confirmDraw")
+      : pendingDrawFromOpponent
+        ? t("acceptDraw")
+        : t("callDraw");
+  const resignButtonLabel = pendingActionConfirm === "resign" ? t("confirmResign") : t("resign");
+  const effectiveRematchLabel = opponentLeftLobby ? t("opponentLeftLabel") : rematchLabel;
+  const effectiveResultDescription = opponentLeftLobby ? t("opponentLeftLobby") : resultDescription(t, state);
 
   return (
     <div className={`app-shell ${showBoard ? "in-game-shell" : ""}`}>
@@ -581,7 +664,13 @@ export default function GamePage() {
                   <h2>{t("onlineMultiplayer")}</h2>
                   <p>{t("waitingForOpponent", { code: roomCode })}</p>
                   {playerSeat ? <p className="muted">{t("yourSeat", { seat: t(playerSeat) })}</p> : null}
-                  <button type="button" className="secondary-button" onClick={() => resetToLobby("online")}>
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    onClick={() => {
+                      void resetToLobby("online");
+                    }}
+                  >
                     {t("backToLobby")}
                   </button>
                 </>
@@ -632,12 +721,12 @@ export default function GamePage() {
 
             <div className="toolbar-group">
               <ActionButton
-                label={pendingDrawFromOpponent ? t("acceptDraw") : t("callDraw")}
+                label={drawButtonLabel}
                 onClick={handleDrawAction}
                 disabled={!actorColor || Boolean(state.winner)}
               />
               <ActionButton
-                label={t("resign")}
+                label={resignButtonLabel}
                 onClick={handleResign}
                 disabled={!actorColor || Boolean(state.winner)}
                 tone="danger"
@@ -703,12 +792,14 @@ export default function GamePage() {
       <GameResultModal
         open={Boolean(state.winner)}
         title={resultTitle}
-        description={resultDescription(t, state)}
-        onBackToLobby={() => resetToLobby(mode)}
+        description={effectiveResultDescription}
+        onBackToLobby={() => {
+          void resetToLobby(mode);
+        }}
         onRematch={handleRematch}
-        rematchLabel={rematchLabel}
-        rematchDisabled={mode === "online" && playerRematchVoted}
-        rematchHint={rematchHint}
+        rematchLabel={effectiveRematchLabel}
+        rematchDisabled={opponentLeftLobby || (mode === "online" && playerRematchVoted)}
+        rematchHint={opponentLeftLobby ? t("opponentLeftLobby") : rematchHint}
         t={t}
       />
     </div>

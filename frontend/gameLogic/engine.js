@@ -76,6 +76,7 @@ export function createInitialState() {
     moveHistory: [],
     pendingPromotion: null,
     pendingAbility: null,
+    abilityUsedThisTurn: false,
     drawOfferBy: null,
     rematchVotes: {
       white: false,
@@ -97,6 +98,7 @@ function cloneState(state) {
     moveHistory: [...state.moveHistory],
     pendingPromotion: state.pendingPromotion ? structuredClone(state.pendingPromotion) : null,
     pendingAbility: state.pendingAbility ? structuredClone(state.pendingAbility) : null,
+    abilityUsedThisTurn: Boolean(state.abilityUsedThisTurn),
     drawOfferBy: state.drawOfferBy || null,
     rematchVotes: state.rematchVotes
       ? { ...state.rematchVotes }
@@ -287,6 +289,7 @@ function finishTurn(state, action) {
   state.lastAction = action;
   state.moveHistory.push(action.description);
   state.drawOfferBy = null;
+  state.abilityUsedThisTurn = false;
   state.rematchVotes = {
     white: false,
     black: false,
@@ -481,6 +484,7 @@ export function getAbilityTargets(state, pieceId) {
   }
   const { piece, position } = lookup;
   if (
+    (state.abilityUsedThisTurn && !state.pendingAbility) ||
     piece.color !== state.currentTurn ||
     piece.status.stunned > 0 ||
     piece.status.frozen > 0 ||
@@ -819,14 +823,15 @@ export function applyAbility(state, pieceId, target) {
 
   if (piece.type === "pawn") {
     piece.status.explosive = true;
-    piece.status.frozen = 2;
-    return finishTurn(next, {
+    next.abilityUsedThisTurn = true;
+    next.lastAction = {
       type: "ability",
       pieceId,
       from: position,
       to: position,
       description: `${piece.color} pawn armed itself`,
-    });
+    };
+    return next;
   }
 
   if (piece.type === "king") {
@@ -834,13 +839,15 @@ export function applyAbility(state, pieceId, target) {
     if (enemy) {
       enemy.status.stunned = 1;
     }
-    return finishTurn(next, {
+    next.abilityUsedThisTurn = true;
+    next.lastAction = {
       type: "ability",
       pieceId,
       from: position,
       description: `${piece.color} king stunned a piece`,
       to: target,
-    });
+    };
+    return next;
   }
 
   if (piece.type === "rook") {

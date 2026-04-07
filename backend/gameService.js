@@ -72,6 +72,7 @@ export async function createRoom(initialState, user, preferredName) {
         [guestSeat]: null,
       },
       historySaved: false,
+      postGameExitBy: null,
       status: "waiting",
       state: serializeState(initialState),
     }),
@@ -87,6 +88,7 @@ export async function createRoom(initialState, user, preferredName) {
       },
       [guestSeat]: null,
     },
+    postGameExitBy: null,
     status: "waiting",
     state: initialState,
   };
@@ -117,6 +119,7 @@ export async function joinRoom(code, user, preferredName) {
               name: playerName,
             },
           },
+          postGameExitBy: null,
           status: "active",
           updatedAt: serverTimestamp(),
         });
@@ -136,6 +139,7 @@ export async function joinRoom(code, user, preferredName) {
       assignedSeat ||
       Object.entries(data.players).find(([, player]) => player?.uid === user.uid)?.[0] ||
       null,
+    postGameExitBy: data.postGameExitBy || null,
     state: deserializeState(data.state),
   };
 }
@@ -160,6 +164,7 @@ export async function updateRoomState(code, nextState) {
         status,
         updatedAt: serverTimestamp(),
         historySaved: false,
+        postGameExitBy: null,
       };
 
       if (nextState.winner && !room.historySaved) {
@@ -185,6 +190,20 @@ export async function updateRoomState(code, nextState) {
       transaction.update(ref, payload);
     }),
     "Firestore timed out while syncing the match state.",
+  );
+}
+
+export async function leaveFinishedRoom(code, uid) {
+  if (!db) {
+    throw new Error("Firebase is not configured.");
+  }
+  const ref = roomRef(code.toUpperCase());
+  await withTimeout(
+    updateDoc(ref, {
+      postGameExitBy: uid,
+      updatedAt: serverTimestamp(),
+    }),
+    "Firestore timed out while leaving the finished room.",
   );
 }
 
