@@ -12,7 +12,7 @@ import {
   subscribeToRoom,
   updateRoomState,
 } from "../../backend/gameService";
-import { ABILITY_IMAGE_ASSETS } from "../gameLogic/constants";
+import { ABILITY_DESCRIPTIONS, ABILITY_IMAGE_ASSETS, EVENT_TYPES, PIECE_TYPES } from "../gameLogic/constants";
 import {
   applyAbility,
   applyMove,
@@ -30,6 +30,16 @@ import {
 } from "../gameLogic/engine";
 import { toSquareKey } from "../gameLogic/helpers";
 import { createTranslator, detectLanguage } from "../i18n";
+
+const REMATCH_TIMEOUT_MS = 60_000;
+const TURN_TIMEOUT_MS = 60_000;
+
+function formatCountdown(ms) {
+  const totalSeconds = Math.max(0, Math.ceil(ms / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}:${String(seconds).padStart(2, "0")}`;
+}
 
 function detectPlayerColor(roomData, authUser) {
   if (!roomData || !authUser) {
@@ -135,9 +145,45 @@ function resultDescription(t, state) {
   return t("resultByUnknown");
 }
 
+function RulesPanel({ t }) {
+  return (
+    <div className="rules-card">
+      <h2>{t("guideTitle")}</h2>
+      <p>{t("guideIntro")}</p>
+
+      <div className="rules-grid">
+        <div className="rules-section">
+          <h3>{t("abilitiesTitle")}</h3>
+          <div className="rules-list">
+            {PIECE_TYPES.map((type) => (
+              <article key={type} className="rule-item">
+                <h4>{t(type)}</h4>
+                <p>{t(`abilityGuide_${type}`) || ABILITY_DESCRIPTIONS[type]}</p>
+              </article>
+            ))}
+          </div>
+        </div>
+
+        <div className="rules-section">
+          <h3>{t("eventsTitle")}</h3>
+          <div className="rules-list">
+            {Object.keys(EVENT_TYPES).map((eventType) => (
+              <article key={eventType} className="rule-item">
+                <h4>{t(`eventGuideTitle_${eventType}`)}</h4>
+                <p>{t(`eventGuide_${eventType}`)}</p>
+              </article>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function GamePage() {
   const language = useMemo(() => detectLanguage(), []);
   const t = useMemo(() => createTranslator(language), [language]);
+  const [menuTab, setMenuTab] = useState("local");
   const [mode, setMode] = useState("local");
   const [state, setState] = useState(createInitialState);
   const [localGameStarted, setLocalGameStarted] = useState(false);
@@ -165,6 +211,9 @@ export default function GamePage() {
   const previousEventKeyRef = useRef(null);
   const eventToastTimeoutRef = useRef(null);
   const pendingConfirmTimeoutRef = useRef(null);
+  const [nowTick, setNowTick] = useState(Date.now());
+  const handledTurnTimeoutRef = useRef(null);
+  const handledRematchTimeoutRef = useRef(null);
 
   useEffect(() => {
     if (typeof window !== "undefined") {
@@ -287,6 +336,13 @@ export default function GamePage() {
     [],
   );
 
+  useEffect(() => {
+    const intervalId = window.setInterval(() => {
+      setNowTick(Date.now());
+    }, 1000);
+    return () => window.clearInterval(intervalId);
+  }, []);
+
   const playerColor = useMemo(
     () => playerSeat || detectPlayerColor(roomData, authUser),
     [playerSeat, roomData, authUser],
@@ -326,6 +382,44 @@ export default function GamePage() {
       to: state.lastAction?.to ? toSquareKey(state.lastAction.to) : null,
     };
   }, [state.lastAction]);
+  const rematchDeadlineAt = state.gameEndedAt ? state.gameEndedAt + REMATCH_TIMEOUT_MS : null;
+  const rematchTimeLeftMs = rematchDeadlineAt ? Math.max(0, rematchDeadlineAt - nowTick) : 0;
+  const turnDeadlineAt = !state.winner && state.turnStartedAt ? state.turnStartedAt + TURN_TIMEOUT_MS : null;
+  const turnTimeLeftMs = turnDeadlineAt ? Math.max(0, turnDeadlineAt - nowTick) : 0;
+  const turnTimerText = turnDeadlineAt ? formatCountdown(turnTimeLeftMs) : "";
+
+  useEffect(() => {
+    if (!(mode === "online" && roomCode && state.winner && state.gameEndedAt)) {
+      handledRematchTimeoutRef.current = null;
+      return;
+    }
+    if (rematchTimeLeftMs > 0) {
+      return;
+    }
+    const timeoutKey = `${roomCode}-${state.gameEndedAt}`;
+    if (handledRematchTimeoutRef.current === timeoutKey) {
+      return;
+    }
+    handledRematchTimeoutRef.current = timeoutKey;
+    setStatusMessage(t("rematchExpired"));
+    void resetToLobby("online");
+  }, [mode, rematchTimeLeftMs, roomCode, state.gameEndedAt, state.winner, t]);
+
+  useEffect(() => {
+    if (!(mode === "online" && roomCode && onlineGameReady && !state.winner && state.turnStartedAt)) {
+      handledTurnTimeoutRef.current = null;
+      return;
+    }
+    if (turnTimeLeftMs > 0) {
+      return;
+    }
+    const timeoutKey = `${roomCode}-${state.currentTurn}-${state.turnStartedAt}`;
+    if (handledTurnTimeoutRef.current === timeoutKey) {
+      return;
+    }
+    handledTurnTimeoutRef.current = timeoutKey;
+    void commitState(resignGame(state, state.currentTurn));
+  }, [mode, onlineGameReady, roomCode, state, turnTimeLeftMs]);
 
   function clearSelection() {
     setSelectedPieceId(null);
@@ -371,9 +465,11 @@ export default function GamePage() {
     if (nextMode === "local") {
       setLocalGameStarted(false);
       setMode("local");
+      setMenuTab("local");
       return;
     }
     setMode("online");
+    setMenuTab("online");
     setLocalGameStarted(false);
   }
 
@@ -446,6 +542,7 @@ export default function GamePage() {
   function startLocalMatch() {
     clearSelection();
     setMode("local");
+    setMenuTab("local");
     setState(createInitialState());
     setLocalHistory([]);
     setLocalGameStarted(true);
@@ -472,6 +569,7 @@ export default function GamePage() {
       const initialState = createInitialState();
       const createdRoom = await createRoom(initialState, authUser, playerName);
       setMode("online");
+      setMenuTab("online");
       setRoomCode(createdRoom.code);
       setPlayerSeat(createdRoom.assignedSeat);
       setRoomData(createdRoom);
@@ -506,6 +604,7 @@ export default function GamePage() {
       setStatusMessage(t("joiningRoomStatus", { code: normalizedCode }));
       const joinedRoom = await joinRoom(normalizedCode, authUser, playerName);
       setMode("online");
+      setMenuTab("online");
       setRoomCode(normalizedCode);
       setPlayerSeat(joinedRoom.assignedSeat);
       setRoomData(joinedRoom);
@@ -601,6 +700,11 @@ export default function GamePage() {
   const resignButtonLabel = pendingActionConfirm === "resign" ? t("confirmResign") : t("resign");
   const effectiveRematchLabel = opponentLeftLobby ? t("opponentLeftLabel") : rematchLabel;
   const effectiveResultDescription = opponentLeftLobby ? t("opponentLeftLobby") : resultDescription(t, state);
+  const rematchCountdownHint =
+    mode === "online" && state.winner ? t("rematchCountdown", { time: formatCountdown(rematchTimeLeftMs) }) : "";
+  const combinedRematchHint = [opponentLeftLobby ? t("opponentLeftLobby") : rematchHint, rematchCountdownHint]
+    .filter(Boolean)
+    .join(" ");
 
   return (
     <div className={`app-shell ${showBoard ? "in-game-shell" : ""}`}>
@@ -614,22 +718,35 @@ export default function GamePage() {
             <div className="header-actions">
               <button
                 type="button"
-                className={mode === "local" ? "tab active" : "tab"}
-                onClick={() => setMode("local")}
+                className={menuTab === "local" ? "tab active" : "tab"}
+                onClick={() => {
+                  setMenuTab("local");
+                  setMode("local");
+                }}
               >
                 {t("local")}
               </button>
               <button
                 type="button"
-                className={mode === "online" ? "tab active" : "tab"}
-                onClick={() => setMode("online")}
+                className={menuTab === "online" ? "tab active" : "tab"}
+                onClick={() => {
+                  setMenuTab("online");
+                  setMode("online");
+                }}
               >
                 {t("online")}
+              </button>
+              <button
+                type="button"
+                className={menuTab === "guide" ? "tab active" : "tab"}
+                onClick={() => setMenuTab("guide")}
+              >
+                {t("guide")}
               </button>
             </div>
           </header>
 
-          {mode === "online" && !roomCode ? (
+          {menuTab === "online" && !roomCode ? (
             <OnlineLobby
               t={t}
               firebaseReady={hasFirebaseConfig}
@@ -651,7 +768,9 @@ export default function GamePage() {
 
           {!showBoard ? (
             <section className="lobby-card">
-              {mode === "local" ? (
+              {menuTab === "guide" ? (
+                <RulesPanel t={t} />
+              ) : mode === "local" ? (
                 <>
                   <h2>{t("localMultiplayer")}</h2>
                   <p>{t("startLocalHint")}</p>
@@ -717,6 +836,11 @@ export default function GamePage() {
                 </span>
               </div>
               {inGameStatus ? <div className="status-ribbon">{inGameStatus}</div> : null}
+              {mode === "online" && !state.winner ? (
+                <div className="status-ribbon timer-ribbon">
+                  {t("turnTimer", { time: turnTimerText })}
+                </div>
+              ) : null}
             </div>
 
             <div className="toolbar-group">
@@ -799,7 +923,7 @@ export default function GamePage() {
         onRematch={handleRematch}
         rematchLabel={effectiveRematchLabel}
         rematchDisabled={opponentLeftLobby || (mode === "online" && playerRematchVoted)}
-        rematchHint={opponentLeftLobby ? t("opponentLeftLobby") : rematchHint}
+        rematchHint={combinedRematchHint}
         t={t}
       />
     </div>

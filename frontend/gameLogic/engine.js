@@ -55,6 +55,7 @@ function initialBackRank(color) {
 
 export function createInitialState() {
   pieceCounter = 0;
+  const now = Date.now();
   const board = makeEmptyBoard();
   board[0] = initialBackRank("black");
   board[1] = Array.from({ length: BOARD_SIZE }, () => createPiece("pawn", "black"));
@@ -83,6 +84,8 @@ export function createInitialState() {
       black: false,
     },
     endReason: null,
+    turnStartedAt: now,
+    gameEndedAt: null,
   };
 }
 
@@ -107,6 +110,8 @@ function cloneState(state) {
           black: false,
         },
     endReason: state.endReason || null,
+    turnStartedAt: state.turnStartedAt || Date.now(),
+    gameEndedAt: state.gameEndedAt || null,
     enPassantTarget: state.enPassantTarget ? { ...state.enPassantTarget } : null,
     lastAction: state.lastAction ? structuredClone(state.lastAction) : null,
   };
@@ -299,6 +304,7 @@ function finishTurn(state, action) {
     if (!state.endReason) {
       state.endReason = "capture";
     }
+    state.gameEndedAt = state.gameEndedAt || Date.now();
     return state;
   }
 
@@ -319,6 +325,7 @@ function finishTurn(state, action) {
   }
 
   state.currentTurn = otherColor(state.currentTurn);
+  state.turnStartedAt = Date.now();
   return state;
 }
 
@@ -757,6 +764,7 @@ export function resignGame(state, color) {
   const next = cloneState(state);
   next.winner = otherColor(color);
   next.endReason = "resign";
+  next.gameEndedAt = Date.now();
   next.drawOfferBy = null;
   next.rematchVotes = {
     white: false,
@@ -779,6 +787,7 @@ export function offerOrAcceptDraw(state, color) {
   if (next.drawOfferBy && next.drawOfferBy !== color) {
     next.winner = "draw";
     next.endReason = "draw";
+    next.gameEndedAt = Date.now();
     next.lastAction = {
       type: "draw",
       description: "Draw agreed",
