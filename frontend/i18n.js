@@ -7,8 +7,8 @@ export function detectLanguage() {
 
 export const translations = {
   en: {
-    appName: "Arcane Chess",
-    appTagline: "Multiplayer strategy chess with shared cooldown abilities and dynamic board events.",
+    appName: "Chess 2",
+    appTagline: "Chess.. but better!",
     local: "Local",
     online: "Online",
     localMultiplayer: "Local Multiplayer",
@@ -81,8 +81,8 @@ export const translations = {
     eventRestoreDescription: "Standing on a restore tile resets that piece type's cooldown.",
   },
   fr: {
-    appName: "Arcane Chess",
-    appTagline: "Jeu d'echecs multijoueur avec capacites a recharge et evenements dynamiques.",
+    appName: "Chess 2",
+    appTagline: "Les échecs... mais en mieux !",
     local: "Local",
     online: "En ligne",
     localMultiplayer: "Partie locale",
