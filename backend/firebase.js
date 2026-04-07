@@ -1,5 +1,11 @@
 import { initializeApp } from "firebase/app";
-import { getAuth, GoogleAuthProvider, signInAnonymously, signInWithPopup } from "firebase/auth";
+import {
+  getAuth,
+  GoogleAuthProvider,
+  signInAnonymously,
+  signInWithPopup,
+  signInWithRedirect,
+} from "firebase/auth";
 import { initializeFirestore } from "firebase/firestore";
 
 const firebaseConfig = {
@@ -39,5 +45,18 @@ export async function signInGoogle() {
   if (!auth) {
     throw new Error("Firebase is not configured.");
   }
-  return signInWithPopup(auth, new GoogleAuthProvider());
+  const provider = new GoogleAuthProvider();
+  try {
+    return await signInWithPopup(auth, provider);
+  } catch (error) {
+    if (
+      error?.code === "auth/popup-blocked" ||
+      error?.code === "auth/popup-closed-by-user" ||
+      error?.code === "auth/cancelled-popup-request"
+    ) {
+      await signInWithRedirect(auth, provider);
+      return null;
+    }
+    throw error;
+  }
 }

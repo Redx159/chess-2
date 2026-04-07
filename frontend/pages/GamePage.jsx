@@ -1,24 +1,28 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { onAuthStateChanged } from "firebase/auth";
 import Board from "../components/Board";
-import ControlPanel from "../components/ControlPanel";
 import OnlineLobby from "../components/OnlineLobby";
 import PromotionModal from "../components/PromotionModal";
 import { auth, hasFirebaseConfig, signInGoogle, signInGuest } from "../../backend/firebase";
 import { createRoom, joinRoom, subscribeToRoom, updateRoomState } from "../../backend/gameService";
+import { PIECE_LABELS } from "../gameLogic/constants";
 import {
   applyAbility,
   applyMove,
   canUseAbility,
+  cloneGameState,
   createInitialState,
   getAbilityTargets,
-  getEventAnnouncement,
-  getEventSummary,
   getLegalMoves,
   getPieceState,
   getVisibleSquares,
+  offerOrAcceptDraw,
+  resignGame,
   resolvePromotion,
+  voteForRematch,
 } from "../gameLogic/engine";
+import { toSquareKey } from "../gameLogic/helpers";
+import { createTranslator, detectLanguage } from "../i18n";
 
 function detectPlayerColor(roomData, authUser) {
   if (!roomData || !authUser) {
@@ -33,10 +37,104 @@ function detectPlayerColor(roomData, authUser) {
   return null;
 }
 
+function ActionButton({ label, onClick, disabled = false, title, tone = "default" }) {
+  return (
+    <button
+      type="button"
+      className={`hud-button ${tone !== "default" ? `hud-button-${tone}` : ""}`}
+      onClick={onClick}
+      disabled={disabled}
+      title={title || label}
+    >
+      {label}
+    </button>
+  );
+}
+
+function GameResultModal({
+  open,
+  title,
+  description,
+  onBackToLobby,
+  onRematch,
+  rematchLabel,
+  rematchDisabled,
+  rematchHint,
+  t,
+}) {
+  if (!open) {
+    return null;
+  }
+
+  return (
+    <div className="modal-backdrop">
+      <div className="modal-card result-card">
+        <h2>{title}</h2>
+        <p>{description}</p>
+        <div className="promotion-grid">
+          <button type="button" className="secondary-button" onClick={onBackToLobby}>
+            {t("backToLobby")}
+          </button>
+          <button type="button" className="primary-button" onClick={onRematch} disabled={rematchDisabled}>
+            {rematchLabel}
+          </button>
+        </div>
+        {rematchHint ? <p className="muted">{rematchHint}</p> : null}
+      </div>
+    </div>
+  );
+}
+
+function eventMessageFor(t, event) {
+  if (!event) {
+    return null;
+  }
+
+  if (event.type === "lava") {
+    return {
+      title: t("eventLavaTitle"),
+      description: t("eventLavaDescription"),
+    };
+  }
+  if (event.type === "portals") {
+    return {
+      title: t("eventPortalsTitle"),
+      description: t("eventPortalsDescription"),
+    };
+  }
+  if (event.type === "fog") {
+    return {
+      title: t("eventFogTitle"),
+      description: t("eventFogDescription"),
+    };
+  }
+  return {
+    title: t("eventRestoreTitle"),
+    description: t("eventRestoreDescription"),
+  };
+}
+
+function resultDescription(t, state) {
+  if (state.endReason === "resign") {
+    const loser = state.winner === "white" ? t("black") : t("white");
+    return t("resultByResign", { loser });
+  }
+  if (state.endReason === "draw") {
+    return t("resultByDraw");
+  }
+  if (state.endReason === "capture") {
+    return t("resultByCapture");
+  }
+  return t("resultByUnknown");
+}
+
 export default function GamePage() {
+  const language = useMemo(() => detectLanguage(), []);
+  const t = useMemo(() => createTranslator(language), [language]);
   const [mode, setMode] = useState("local");
   const [state, setState] = useState(createInitialState);
   const [localGameStarted, setLocalGameStarted] = useState(false);
+  const [localHistory, setLocalHistory] = useState([]);
   const [selectedPieceId, setSelectedPieceId] = useState(null);
   const [abilityMode, setAbilityMode] = useState(false);
   const [authUser, setAuthUser] = useState(null);
@@ -46,9 +144,21 @@ export default function GamePage() {
   const [roomCodeInput, setRoomCodeInput] = useState("");
   const [roomData, setRoomData] = useState(null);
   const [playerSeat, setPlayerSeat] = useState(null);
+  const [playerName, setPlayerName] = useState(() => {
+    if (typeof window === "undefined") {
+      return "";
+    }
+    return window.localStorage.getItem("arcane-chess-player-name") || "";
+  });
   const [isCreatingRoom, setIsCreatingRoom] = useState(false);
   const [isJoiningRoom, setIsJoiningRoom] = useState(false);
   const previousEventKeyRef = useRef(null);
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem("arcane-chess-player-name", playerName);
+    }
+  }, [playerName]);
 
   useEffect(() => {
     if (!auth) {
@@ -88,14 +198,14 @@ export default function GamePage() {
       ? `${state.activeEvent.type}-${state.activeEvent.startedOnTurn ?? "manual"}`
       : null;
     if (eventKey && eventKey !== previousEventKeyRef.current) {
-      setEventToast(getEventAnnouncement(state.activeEvent));
+      setEventToast(eventMessageFor(t, state.activeEvent));
       const timeoutId = window.setTimeout(() => setEventToast(null), 3200);
       previousEventKeyRef.current = eventKey;
       return () => window.clearTimeout(timeoutId);
     }
     previousEventKeyRef.current = eventKey;
     return undefined;
-  }, [state.activeEvent]);
+  }, [state.activeEvent, t]);
 
   const playerColor = useMemo(
     () => playerSeat || detectPlayerColor(roomData, authUser),
@@ -118,13 +228,56 @@ export default function GamePage() {
     Boolean(roomData?.players?.white) &&
     Boolean(roomData?.players?.black);
   const showBoard = (mode === "local" && localGameStarted) || onlineGameReady;
+  const actorColor = mode === "online" ? playerColor : state.currentTurn;
+  const abilityCooldown = selectedPiece ? state.cooldowns[selectedPiece.color][selectedPiece.type] : 0;
+  const abilitySymbol = selectedPiece ? PIECE_LABELS[selectedPiece.color][selectedPiece.type] : "✦";
+  const waitingForOpponent = mode === "online" && roomCode && !onlineGameReady;
+  const pendingDrawFromOpponent = Boolean(
+    actorColor && state.drawOfferBy && state.drawOfferBy !== actorColor,
+  );
+  const playerRematchVoted = Boolean(actorColor && state.rematchVotes?.[actorColor]);
+  const rematchVotesCount = Number(Boolean(state.rematchVotes?.white)) + Number(Boolean(state.rematchVotes?.black));
+  const lastMoveSquares = useMemo(() => {
+    if (!state.lastAction?.from && !state.lastAction?.to) {
+      return null;
+    }
+    return {
+      from: state.lastAction?.from ? toSquareKey(state.lastAction.from) : null,
+      to: state.lastAction?.to ? toSquareKey(state.lastAction.to) : null,
+    };
+  }, [state.lastAction]);
 
   function clearSelection() {
     setSelectedPieceId(null);
     setAbilityMode(false);
   }
 
+  function resetToLobby(nextMode = mode) {
+    clearSelection();
+    setEventToast(null);
+    setStatusMessage("");
+    setState(createInitialState());
+    setRoomData(null);
+    setRoomCode("");
+    setRoomCodeInput("");
+    setPlayerSeat(null);
+    setLocalHistory([]);
+    if (nextMode === "local") {
+      setLocalGameStarted(false);
+      setMode("local");
+      return;
+    }
+    setMode("online");
+    setLocalGameStarted(false);
+  }
+
   async function commitState(nextState) {
+    if (nextState === state) {
+      return;
+    }
+    if (mode === "local") {
+      setLocalHistory((history) => [...history, cloneGameState(state)]);
+    }
     setState(nextState);
     if (nextState.pendingAbility?.type === "knight") {
       setSelectedPieceId(nextState.pendingAbility.pieceId);
@@ -135,6 +288,14 @@ export default function GamePage() {
     if (mode === "online" && roomCode && !nextState.pendingPromotion) {
       await updateRoomState(roomCode, nextState);
     }
+  }
+
+  function ensurePlayerName() {
+    if (playerName.trim()) {
+      return true;
+    }
+    setStatusMessage(t("chooseUsernameFirst"));
+    return false;
   }
 
   async function handleSquareClick(square) {
@@ -174,12 +335,13 @@ export default function GamePage() {
     }
   }
 
-  async function handleReset() {
-    const nextState = createInitialState();
-    if (mode === "local") {
-      setLocalGameStarted(true);
-    }
-    await commitState(nextState);
+  function startLocalMatch() {
+    clearSelection();
+    setMode("local");
+    setState(createInitialState());
+    setLocalHistory([]);
+    setLocalGameStarted(true);
+    setStatusMessage("");
   }
 
   async function handlePromotion(choice) {
@@ -189,21 +351,29 @@ export default function GamePage() {
 
   async function handleCreateRoom() {
     if (!authUser) {
-      setStatusMessage("Sign in first.");
+      setStatusMessage(t("signInFirst"));
+      return;
+    }
+    if (!ensurePlayerName()) {
       return;
     }
 
     try {
       setIsCreatingRoom(true);
-      setStatusMessage("Creating room...");
+      setStatusMessage(t("creatingRoomStatus"));
       const initialState = createInitialState();
-      const createdRoom = await createRoom(initialState, authUser);
+      const createdRoom = await createRoom(initialState, authUser, playerName);
       setMode("online");
       setRoomCode(createdRoom.code);
       setPlayerSeat(createdRoom.assignedSeat);
       setRoomData(createdRoom);
       setState(initialState);
-      setStatusMessage(`Room ${createdRoom.code} created. You are ${createdRoom.assignedSeat}.`);
+      setStatusMessage(
+        t("roomCreated", {
+          code: createdRoom.code,
+          seat: t(createdRoom.assignedSeat),
+        }),
+      );
     } catch (error) {
       console.error("Create room failed", error);
       setStatusMessage(error?.message || "Failed to create room.");
@@ -214,21 +384,24 @@ export default function GamePage() {
 
   async function handleJoinRoom() {
     if (!authUser) {
-      setStatusMessage("Sign in first.");
+      setStatusMessage(t("signInFirst"));
+      return;
+    }
+    if (!ensurePlayerName()) {
       return;
     }
 
     try {
       setIsJoiningRoom(true);
       const normalizedCode = roomCodeInput.toUpperCase();
-      setStatusMessage(`Joining room ${normalizedCode}...`);
-      const joinedRoom = await joinRoom(normalizedCode, authUser);
+      setStatusMessage(t("joiningRoomStatus", { code: normalizedCode }));
+      const joinedRoom = await joinRoom(normalizedCode, authUser, playerName);
       setMode("online");
       setRoomCode(normalizedCode);
       setPlayerSeat(joinedRoom.assignedSeat);
       setRoomData(joinedRoom);
       setState(joinedRoom.state);
-      setStatusMessage(`Joined room ${normalizedCode}.`);
+      setStatusMessage(t("joinedRoom", { code: normalizedCode }));
     } catch (error) {
       console.error("Join room failed", error);
       setStatusMessage(error?.message || "Failed to join room.");
@@ -237,96 +410,219 @@ export default function GamePage() {
     }
   }
 
+  async function handleGuestSignIn() {
+    if (!ensurePlayerName()) {
+      return;
+    }
+    signInGuest().catch((error) => setStatusMessage(error.message));
+  }
+
+  async function handleGoogleSignIn() {
+    if (!ensurePlayerName()) {
+      return;
+    }
+    signInGoogle().catch((error) => setStatusMessage(error.message));
+  }
+
+  async function handleResign() {
+    const nextState = resignGame(state, actorColor);
+    await commitState(nextState);
+  }
+
+  async function handleDrawAction() {
+    const nextState = offerOrAcceptDraw(state, actorColor);
+    await commitState(nextState);
+  }
+
+  function handleUndo() {
+    if (!localHistory.length) {
+      return;
+    }
+    const previous = localHistory[localHistory.length - 1];
+    setLocalHistory((history) => history.slice(0, -1));
+    setState(cloneGameState(previous));
+    clearSelection();
+  }
+
+  async function handleRematch() {
+    clearSelection();
+    setEventToast(null);
+    if (mode === "local") {
+      const nextState = createInitialState();
+      setLocalHistory([]);
+      setLocalGameStarted(true);
+      setState(nextState);
+      return;
+    }
+    const nextState = voteForRematch(state, actorColor);
+    await commitState(nextState);
+  }
+
+  const resultTitle =
+    state.winner === "draw"
+      ? t("drawTitle")
+      : t("winnerTitle", { winner: t(state.winner || "white") });
+  const inGameStatus = pendingDrawFromOpponent
+    ? t("drawOffered", { color: t(state.drawOfferBy) })
+    : waitingForOpponent
+      ? t("waitingForOpponent", { code: roomCode })
+      : roomCode || "";
+  const rematchLabel =
+    mode === "online" ? (playerRematchVoted ? t("rematchVoted") : t("voteRematch")) : t("rematch");
+  const rematchHint =
+    mode === "online" && state.winner && rematchVotesCount > 0 ? t("rematchPending") : "";
+
   return (
-    <div className="app-shell">
-      <header className="hero">
-        <div>
-          <p className="eyebrow">Arcane Chess</p>
-          <h1>Multiplayer strategy chess with shared cooldown abilities and dynamic board events.</h1>
-        </div>
-        <div className="header-actions">
-          <button type="button" className={mode === "local" ? "tab active" : "tab"} onClick={() => setMode("local")}>
-            Local
-          </button>
-          <button type="button" className={mode === "online" ? "tab active" : "tab"} onClick={() => setMode("online")}>
-            Online
-          </button>
-        </div>
-      </header>
-
-      {eventToast ? (
-        <div className="event-toast-overlay">
-          <div className="event-toast">
-            <p className="event-toast-title">{eventToast.title}</p>
-            <p className="event-toast-description">{eventToast.description}</p>
-          </div>
-        </div>
-      ) : null}
-
-      {mode === "online" ? (
-        <OnlineLobby
-          firebaseReady={hasFirebaseConfig}
-          authUser={authUser}
-          roomCodeInput={roomCodeInput}
-          onRoomCodeInput={setRoomCodeInput}
-          onGuestSignIn={() => signInGuest().catch((error) => setStatusMessage(error.message))}
-          onGoogleSignIn={() => signInGoogle().catch((error) => setStatusMessage(error.message))}
-          onCreateRoom={handleCreateRoom}
-          onJoinRoom={handleJoinRoom}
-          statusMessage={statusMessage}
-          isCreatingRoom={isCreatingRoom}
-          isJoiningRoom={isJoiningRoom}
-        />
-      ) : null}
-
+    <div className={`app-shell ${showBoard ? "in-game-shell" : ""}`}>
       {!showBoard ? (
-        <section className="lobby-card">
-          {mode === "local" ? (
-            <>
-              <h2>Local Multiplayer</h2>
-              <p>Start a same-device match to reveal the board.</p>
+        <>
+          <header className="hero">
+            <div>
+              <p className="eyebrow">{t("appName")}</p>
+              <h1>{t("appTagline")}</h1>
+            </div>
+            <div className="header-actions">
               <button
                 type="button"
-                className="primary-button"
-                onClick={() => {
-                  setState(createInitialState());
-                  setLocalGameStarted(true);
-                  setStatusMessage("");
-                }}
+                className={mode === "local" ? "tab active" : "tab"}
+                onClick={() => setMode("local")}
               >
-                Start Local Match
+                {t("local")}
               </button>
-            </>
-          ) : (
-            <>
-              <h2>Online Match</h2>
-              <p>Create a room or join one with a code to start playing.</p>
-            </>
-          )}
-        </section>
+              <button
+                type="button"
+                className={mode === "online" ? "tab active" : "tab"}
+                onClick={() => setMode("online")}
+              >
+                {t("online")}
+              </button>
+            </div>
+          </header>
+
+          {mode === "online" && !roomCode ? (
+            <OnlineLobby
+              t={t}
+              firebaseReady={hasFirebaseConfig}
+              authUser={authUser}
+              playerName={playerName}
+              onPlayerNameChange={setPlayerName}
+              roomCodeInput={roomCodeInput}
+              onRoomCodeInput={setRoomCodeInput}
+              onGuestSignIn={handleGuestSignIn}
+              onGoogleSignIn={handleGoogleSignIn}
+              onCreateRoom={handleCreateRoom}
+              onJoinRoom={handleJoinRoom}
+              statusMessage={statusMessage}
+              isCreatingRoom={isCreatingRoom}
+              isJoiningRoom={isJoiningRoom}
+            />
+          ) : null}
+
+          {!showBoard ? (
+            <section className="lobby-card">
+              {mode === "local" ? (
+                <>
+                  <h2>{t("localMultiplayer")}</h2>
+                  <p>{t("startLocalHint")}</p>
+                  <button type="button" className="primary-button" onClick={startLocalMatch}>
+                    {t("startLocalMatch")}
+                  </button>
+                </>
+              ) : waitingForOpponent ? (
+                <>
+                  <h2>{t("onlineMultiplayer")}</h2>
+                  <p>{t("waitingForOpponent", { code: roomCode })}</p>
+                  {playerSeat ? <p className="muted">{t("yourSeat", { seat: t(playerSeat) })}</p> : null}
+                  <button type="button" className="secondary-button" onClick={() => resetToLobby("online")}>
+                    {t("backToLobby")}
+                  </button>
+                </>
+              ) : (
+                <>
+                  <h2>{t("onlineMultiplayer")}</h2>
+                  <p>{t("onlineHint")}</p>
+                </>
+              )}
+            </section>
+          ) : null}
+        </>
       ) : (
-        <main className="game-layout">
-          <Board
-            state={state}
-            perspective={perspective}
-            selectedPieceId={selectedPieceId}
-            moveTargets={moveTargets}
-            abilityTargets={abilityTargets}
-            visibleSquares={visibleSquares}
-            onSquareClick={handleSquareClick}
-          />
-          <ControlPanel
-            state={state}
-            selectedPiece={selectedPiece}
-            abilityReady={abilityReady}
-          abilityMode={abilityMode}
-          onToggleAbilityMode={() => setAbilityMode((current) => !current)}
-          onReset={handleReset}
-          mode={mode}
-          roomCode={roomCode}
-          playerColor={playerColor}
-          pendingAbility={state.pendingAbility}
-          />
+        <main className="game-screen">
+          {eventToast ? (
+            <div className="event-toast-overlay">
+              <div className="event-toast">
+                <p className="event-toast-title">{eventToast.title}</p>
+                <p className="event-toast-description">{eventToast.description}</p>
+              </div>
+            </div>
+          ) : null}
+
+          <div className="board-stage">
+            <Board
+              state={state}
+              perspective={perspective}
+              selectedPieceId={selectedPieceId}
+              lastMoveSquares={lastMoveSquares}
+              moveTargets={moveTargets}
+              abilityTargets={abilityTargets}
+              visibleSquares={visibleSquares}
+              onSquareClick={handleSquareClick}
+            />
+
+            <div className="hud-group hud-left">
+              <ActionButton label="←" onClick={() => resetToLobby(mode)} title={t("backToLobby")} />
+              {mode === "local" ? (
+                <ActionButton
+                  label="↶"
+                  onClick={handleUndo}
+                  disabled={!localHistory.length}
+                  title={t("backMoveHint")}
+                />
+              ) : null}
+            </div>
+
+            <div className="hud-group hud-right">
+              <ActionButton
+                label={pendingDrawFromOpponent ? t("acceptDraw") : t("callDraw")}
+                onClick={handleDrawAction}
+                disabled={!actorColor || Boolean(state.winner)}
+              />
+              <ActionButton
+                label={t("resign")}
+                onClick={handleResign}
+                disabled={!actorColor || Boolean(state.winner)}
+                tone="danger"
+              />
+            </div>
+
+            <div className="status-ribbon">
+              {inGameStatus ? <span>{inGameStatus}</span> : null}
+              {mode === "online" && state.winner && rematchVotesCount > 0 ? (
+                <span>{`${rematchVotesCount}/2`}</span>
+              ) : null}
+            </div>
+
+            <button
+              type="button"
+              className={`ability-fab ${abilityMode ? "active" : ""}`}
+              onClick={() => setAbilityMode((current) => !current)}
+              disabled={!selectedPiece || !abilityReady || Boolean(state.winner)}
+              title={
+                abilityMode
+                  ? t("cancelAbility")
+                  : selectedPiece
+                    ? t("useAbility")
+                    : t("abilityUnavailable")
+              }
+            >
+              <span className="ability-icon">{abilitySymbol}</span>
+              {abilityCooldown > 0 ? <span className="ability-cooldown">{abilityCooldown}</span> : null}
+            </button>
+
+            {state.pendingAbility?.type === "knight" ? (
+              <div className="ability-hint">{t("knightAbilityHint")}</div>
+            ) : null}
+          </div>
         </main>
       )}
 
@@ -334,6 +630,19 @@ export default function GamePage() {
         open={Boolean(state.pendingPromotion)}
         color={state.pendingPromotion?.color}
         onChoose={handlePromotion}
+        t={t}
+      />
+
+      <GameResultModal
+        open={Boolean(state.winner)}
+        title={resultTitle}
+        description={resultDescription(t, state)}
+        onBackToLobby={() => resetToLobby(mode)}
+        onRematch={handleRematch}
+        rematchLabel={rematchLabel}
+        rematchDisabled={mode === "online" && playerRematchVoted}
+        rematchHint={rematchHint}
+        t={t}
       />
     </div>
   );

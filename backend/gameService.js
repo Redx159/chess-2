@@ -34,13 +34,22 @@ function randomSeat() {
   return Math.random() < 0.5 ? "white" : "black";
 }
 
-export async function createRoom(initialState, user) {
+function resolvePlayerName(user, preferredName) {
+  const candidate = preferredName?.trim();
+  if (candidate) {
+    return candidate.slice(0, 24);
+  }
+  return user.displayName || "Guest";
+}
+
+export async function createRoom(initialState, user, preferredName) {
   if (!db) {
     throw new Error("Firebase is not configured.");
   }
   const code = generateRoomCode();
   const hostSeat = randomSeat();
   const guestSeat = hostSeat === "white" ? "black" : "white";
+  const playerName = resolvePlayerName(user, preferredName);
 
   await withTimeout(
     setDoc(roomRef(code), {
@@ -50,7 +59,7 @@ export async function createRoom(initialState, user) {
       players: {
         [hostSeat]: {
           uid: user.uid,
-          name: user.displayName || "Guest",
+          name: playerName,
         },
         [guestSeat]: null,
       },
@@ -65,7 +74,7 @@ export async function createRoom(initialState, user) {
     players: {
       [hostSeat]: {
         uid: user.uid,
-        name: user.displayName || "Guest",
+        name: playerName,
       },
       [guestSeat]: null,
     },
@@ -74,12 +83,13 @@ export async function createRoom(initialState, user) {
   };
 }
 
-export async function joinRoom(code, user) {
+export async function joinRoom(code, user, preferredName) {
   if (!db) {
     throw new Error("Firebase is not configured.");
   }
   const ref = roomRef(code.toUpperCase());
   let assignedSeat = null;
+  const playerName = resolvePlayerName(user, preferredName);
   await withTimeout(
     runTransaction(db, async (transaction) => {
       const snapshot = await transaction.get(ref);
@@ -95,7 +105,7 @@ export async function joinRoom(code, user) {
             ...data.players,
             [openSeat]: {
               uid: user.uid,
-              name: user.displayName || "Guest",
+              name: playerName,
             },
           },
           status: "active",

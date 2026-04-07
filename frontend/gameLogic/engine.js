@@ -76,6 +76,12 @@ export function createInitialState() {
     moveHistory: [],
     pendingPromotion: null,
     pendingAbility: null,
+    drawOfferBy: null,
+    rematchVotes: {
+      white: false,
+      black: false,
+    },
+    endReason: null,
   };
 }
 
@@ -91,6 +97,14 @@ function cloneState(state) {
     moveHistory: [...state.moveHistory],
     pendingPromotion: state.pendingPromotion ? structuredClone(state.pendingPromotion) : null,
     pendingAbility: state.pendingAbility ? structuredClone(state.pendingAbility) : null,
+    drawOfferBy: state.drawOfferBy || null,
+    rematchVotes: state.rematchVotes
+      ? { ...state.rematchVotes }
+      : {
+          white: false,
+          black: false,
+        },
+    endReason: state.endReason || null,
     enPassantTarget: state.enPassantTarget ? { ...state.enPassantTarget } : null,
     lastAction: state.lastAction ? structuredClone(state.lastAction) : null,
   };
@@ -272,8 +286,16 @@ function decayCooldownsAndStatuses(state, color) {
 function finishTurn(state, action) {
   state.lastAction = action;
   state.moveHistory.push(action.description);
+  state.drawOfferBy = null;
+  state.rematchVotes = {
+    white: false,
+    black: false,
+  };
   resolveBoardEventPostMove(state);
   if (state.winner) {
+    if (!state.endReason) {
+      state.endReason = "capture";
+    }
     return state;
   }
 
@@ -720,6 +742,65 @@ export function resolvePromotion(state, choice) {
   });
 }
 
+export function cloneGameState(state) {
+  return deserializeState(JSON.parse(JSON.stringify(serializeState(state))));
+}
+
+export function resignGame(state, color) {
+  if (!color || state.winner) {
+    return state;
+  }
+  const next = cloneState(state);
+  next.winner = otherColor(color);
+  next.endReason = "resign";
+  next.drawOfferBy = null;
+  next.rematchVotes = {
+    white: false,
+    black: false,
+  };
+  next.lastAction = {
+    type: "resign",
+    description: `${color} resigned`,
+  };
+  next.moveHistory.push(next.lastAction.description);
+  return next;
+}
+
+export function offerOrAcceptDraw(state, color) {
+  if (!color || state.winner) {
+    return state;
+  }
+  const next = cloneState(state);
+
+  if (next.drawOfferBy && next.drawOfferBy !== color) {
+    next.winner = "draw";
+    next.endReason = "draw";
+    next.lastAction = {
+      type: "draw",
+      description: "Draw agreed",
+    };
+    next.moveHistory.push(next.lastAction.description);
+    next.drawOfferBy = null;
+    next.rematchVotes = {
+      white: false,
+      black: false,
+    };
+    return next;
+  }
+
+  if (next.drawOfferBy === color) {
+    return state;
+  }
+
+  next.drawOfferBy = color;
+  next.lastAction = {
+    type: "draw-offer",
+    description: `${color} offered draw`,
+  };
+  next.moveHistory.push(next.lastAction.description);
+  return next;
+}
+
 export function applyAbility(state, pieceId, target) {
   const options = getAbilityTargets(state, pieceId);
   const choice = options.find((option) => option.x === target.x && option.y === target.y);
@@ -742,6 +823,8 @@ export function applyAbility(state, pieceId, target) {
     return finishTurn(next, {
       type: "ability",
       pieceId,
+      from: position,
+      to: position,
       description: `${piece.color} pawn armed itself`,
     });
   }
@@ -754,7 +837,9 @@ export function applyAbility(state, pieceId, target) {
     return finishTurn(next, {
       type: "ability",
       pieceId,
+      from: position,
       description: `${piece.color} king stunned a piece`,
+      to: target,
     });
   }
 
@@ -772,6 +857,8 @@ export function applyAbility(state, pieceId, target) {
       next.lastAction = {
         type: "ability",
         pieceId,
+        from: position,
+        to: choice.end,
         description: `${piece.color} rook pushed a pawn into promotion`,
       };
       return next;
@@ -779,6 +866,8 @@ export function applyAbility(state, pieceId, target) {
     return finishTurn(next, {
       type: "ability",
       pieceId,
+      from: position,
+      to: target,
       description: `${piece.color} rook repositioned an ally`,
     });
   }
@@ -802,6 +891,8 @@ export function applyAbility(state, pieceId, target) {
     return finishTurn(next, {
       type: "ability",
       pieceId,
+      from: position,
+      to: landing,
       description: `${piece.color} bishop phased`,
     });
   }
@@ -825,6 +916,8 @@ export function applyAbility(state, pieceId, target) {
     return finishTurn(next, {
       type: "ability",
       pieceId,
+      from: position,
+      to: landing,
       description: `${piece.color} queen warped`,
     });
   }
@@ -837,6 +930,8 @@ export function applyAbility(state, pieceId, target) {
         return finishTurn(next, {
           type: "ability",
           pieceId,
+          from: position,
+          to: target,
           description: `${piece.color} knight exploded during its jump`,
         });
       }
@@ -851,6 +946,8 @@ export function applyAbility(state, pieceId, target) {
       return finishTurn(next, {
         type: "ability",
         pieceId,
+        from: position,
+        to: landing,
         description: `${piece.color} knight captured the king`,
       });
     }
@@ -863,6 +960,8 @@ export function applyAbility(state, pieceId, target) {
       next.lastAction = {
         type: "ability",
         pieceId,
+        from: position,
+        to: landing,
         description: `${piece.color} knight made its first jump`,
       };
       return next;
@@ -872,6 +971,8 @@ export function applyAbility(state, pieceId, target) {
     return finishTurn(next, {
       type: "ability",
       pieceId,
+      from: position,
+      to: landing,
       description: `${piece.color} knight completed its double jump`,
     });
   }
@@ -969,4 +1070,32 @@ export function deserializeState(state) {
 
 export function squareFromKey(key) {
   return fromSquareKey(key);
+}
+
+export function voteForRematch(state, color) {
+  if (!state.winner || !color) {
+    return state;
+  }
+
+  const next = cloneState(state);
+  next.rematchVotes = {
+    white: Boolean(next.rematchVotes?.white),
+    black: Boolean(next.rematchVotes?.black),
+  };
+
+  if (next.rematchVotes[color]) {
+    return state;
+  }
+
+  next.rematchVotes[color] = true;
+  next.lastAction = {
+    type: "rematch-vote",
+    description: `${color} voted for rematch`,
+  };
+
+  if (next.rematchVotes.white && next.rematchVotes.black) {
+    return createInitialState();
+  }
+
+  return next;
 }

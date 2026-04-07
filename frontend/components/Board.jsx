@@ -7,6 +7,8 @@ function Square({
   piece,
   isDark,
   isSelected,
+  isLastMoveFrom,
+  isLastMoveTo,
   isMoveTarget,
   isAbilityTarget,
   isVisible,
@@ -18,6 +20,8 @@ function Square({
     "board-square",
     isDark ? "dark" : "light",
     isSelected ? "selected" : "",
+    isLastMoveFrom ? "last-move-from" : "",
+    isLastMoveTo ? "last-move-to" : "",
     isVisible && isMoveTarget ? "move-target" : "",
     isVisible && isAbilityTarget ? "ability-target" : "",
     isVisible && isEventTile ? `event-${isEventTile}` : "",
@@ -44,6 +48,7 @@ export default function Board({
   state,
   perspective,
   selectedPieceId,
+  lastMoveSquares,
   moveTargets,
   abilityTargets,
   visibleSquares,
@@ -79,6 +84,8 @@ export default function Board({
             const key = toSquareKey(square);
             const visible = visibleSquares.has(key);
             const cooldown = piece ? state.cooldowns[piece.color][piece.type] : 0;
+            const isLastMoveFrom = lastMoveSquares?.from === key;
+            const isLastMoveTo = lastMoveSquares?.to === key;
 
             return (
               <Square
@@ -87,6 +94,8 @@ export default function Board({
                 piece={piece}
                 isDark={(actualX + actualY) % 2 === 1}
                 isSelected={selected}
+                isLastMoveFrom={isLastMoveFrom}
+                isLastMoveTo={isLastMoveTo}
                 isMoveTarget={isMoveTarget}
                 isAbilityTarget={isAbilityTarget}
                 isVisible={visible}
