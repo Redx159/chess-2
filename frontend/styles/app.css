@@ -599,7 +599,7 @@ button {
 
 .event-toast {
   width: min(92vw, 720px);
-  padding: 28px 32px;
+  padding: 18px 22px;
   border-radius: 24px;
   background: linear-gradient(135deg, rgba(8, 13, 20, 0.96), rgba(24, 35, 48, 0.94));
   border: 1px solid rgba(242, 185, 109, 0.68);
@@ -610,27 +610,24 @@ button {
   animation: event-pop 220ms ease;
 }
 
-.event-toast-overlay {
-  position: fixed;
-  inset: 0;
+.event-banner {
+  width: min(96vw, 1120px);
   display: grid;
-  place-items: center;
-  padding: 24px;
+  justify-items: center;
   pointer-events: none;
-  z-index: 1000;
 }
 
 .event-toast-title {
   margin: 0;
-  font-size: clamp(1.55rem, 3vw, 2.65rem);
-  line-height: 1.05;
+  font-size: clamp(1rem, 2vw, 1.35rem);
+  line-height: 1.1;
   letter-spacing: 0.02em;
 }
 
 .event-toast-description {
-  margin: 12px 0 0;
+  margin: 8px 0 0;
   color: rgba(255, 246, 232, 0.92);
-  font-size: clamp(1rem, 1.7vw, 1.15rem);
+  font-size: clamp(0.86rem, 1.5vw, 1rem);
   font-weight: 500;
 }
 

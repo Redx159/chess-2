@@ -32,7 +32,9 @@ import { toSquareKey } from "../gameLogic/helpers";
 import { createTranslator, detectLanguage } from "../i18n";
 
 const REMATCH_TIMEOUT_MS = 60_000;
-const TURN_TIMEOUT_MS = 60_000;
+const TURN_TIMEOUT_MS = 120_000;
+const BOT_COLOR = "black";
+const HUMAN_BOT_COLOR = "white";
 
 function formatCountdown(ms) {
   const totalSeconds = Math.max(0, Math.ceil(ms / 1000));
@@ -52,6 +54,216 @@ function detectPlayerColor(roomData, authUser) {
     return "black";
   }
   return null;
+}
+
+function listColorPieceIds(state, color) {
+  const pieceIds = [];
+  for (const row of state.board) {
+    for (const piece of row) {
+      if (piece?.color === color) {
+        pieceIds.push(piece.id);
+      }
+    }
+  }
+  return pieceIds;
+}
+
+function randomItem(items) {
+  if (!items.length) {
+    return null;
+  }
+  return items[Math.floor(Math.random() * items.length)];
+}
+
+const BOT_PIECE_VALUES = {
+  pawn: 100,
+  knight: 320,
+  bishop: 330,
+  rook: 500,
+  queen: 900,
+  king: 20_000,
+};
+
+function evaluateMaterial(state, color) {
+  let score = 0;
+  for (const row of state.board) {
+    for (const piece of row) {
+      if (!piece) {
+        continue;
+      }
+      const value = BOT_PIECE_VALUES[piece.type] || 0;
+      score += piece.color === color ? value : -value;
+    }
+  }
+  return score;
+}
+
+function canColorCaptureSquare(state, attackerColor, square) {
+  const pieceIds = listColorPieceIds(state, attackerColor);
+  for (const pieceId of pieceIds) {
+    const moves = getLegalMoves({ ...state, currentTurn: attackerColor }, pieceId);
+    if (moves.some((move) => move.x === square.x && move.y === square.y)) {
+      return true;
+    }
+    const abilityTargets = getAbilityTargets({ ...state, currentTurn: attackerColor }, pieceId);
+    if (abilityTargets.some((move) => move.x === square.x && move.y === square.y)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function isKingUnderThreat(state, color) {
+  const kingState = listColorPieceIds(state, color)
+    .map((pieceId) => getPieceState(state, pieceId))
+    .find((entry) => entry?.piece?.type === "king");
+  if (!kingState) {
+    return true;
+  }
+  return canColorCaptureSquare(state, color === "white" ? "black" : "white", kingState.position);
+}
+
+function evaluateKingSafety(state, color) {
+  return isKingUnderThreat(state, color) ? -250 : 0;
+}
+
+function evaluateHangingPieces(state, color) {
+  let score = 0;
+  for (const pieceId of listColorPieceIds(state, color)) {
+    const pieceState = getPieceState(state, pieceId);
+    if (!pieceState) {
+      continue;
+    }
+    if (canColorCaptureSquare(state, color === "white" ? "black" : "white", pieceState.position)) {
+      score -= (BOT_PIECE_VALUES[pieceState.piece.type] || 0) * 0.35;
+    }
+  }
+  return score;
+}
+
+function evaluateBotState(state, color) {
+  if (state.winner === color) {
+    return 1_000_000;
+  }
+  if (state.winner && state.winner !== "draw") {
+    return -1_000_000;
+  }
+  if (state.winner === "draw") {
+    return 0;
+  }
+
+  return (
+    evaluateMaterial(state, color) +
+    evaluateKingSafety(state, color) -
+    evaluateKingSafety(state, color === "white" ? "black" : "white") +
+    evaluateHangingPieces(state, color) -
+    evaluateHangingPieces(state, color === "white" ? "black" : "white")
+  );
+}
+
+function simulateBotAction(state, action) {
+  if (action.type === "ability") {
+    return applyAbility(state, action.pieceId, action.target);
+  }
+  return applyMove(state, action.pieceId, action.target, "queen");
+}
+
+function listBotActions(state) {
+  const pieceIds = listColorPieceIds(state, state.currentTurn);
+  const candidates = [];
+
+  for (const pieceId of pieceIds) {
+    const moves = getLegalMoves(state, pieceId);
+    for (const move of moves) {
+      candidates.push({ type: "move", pieceId, target: move });
+    }
+
+    const abilityTargets = getAbilityTargets(state, pieceId);
+    for (const target of abilityTargets) {
+      candidates.push({ type: "ability", pieceId, target });
+    }
+  }
+
+  return candidates;
+}
+
+function chooseBotTurn(state, depth = 0) {
+  if (state.winner) {
+    return {
+      score: evaluateBotState(state, BOT_COLOR),
+      finalState: state,
+      firstAction: null,
+      safe: !isKingUnderThreat(state, BOT_COLOR),
+    };
+  }
+
+  if (state.pendingPromotion?.color === BOT_COLOR) {
+    const promotedState = resolvePromotion(state, "queen");
+    return chooseBotTurn(promotedState, depth + 1);
+  }
+
+  if (state.currentTurn !== BOT_COLOR || depth >= 4) {
+    const safe = !isKingUnderThreat(state, BOT_COLOR);
+    let score = evaluateBotState(state, BOT_COLOR);
+    if (!safe) {
+      score -= 5_000;
+    }
+    return {
+      score,
+      finalState: state,
+      firstAction: null,
+      safe,
+    };
+  }
+
+  const botStartsInCheck = isKingUnderThreat(state, BOT_COLOR);
+  const options = listBotActions(state);
+  let bestChoice = null;
+
+  for (const action of options) {
+    const nextState = simulateBotAction(state, action);
+    if (nextState === state) {
+      continue;
+    }
+
+    const result = chooseBotTurn(nextState, depth + 1);
+    const targetPiece = state.board[action.target.y]?.[action.target.x];
+    let score = result.score;
+    if (targetPiece && targetPiece.color !== BOT_COLOR) {
+      score += (BOT_PIECE_VALUES[targetPiece.type] || 0) * 0.08;
+    }
+    if (botStartsInCheck && !result.safe) {
+      continue;
+    }
+    if (!bestChoice || score > bestChoice.score) {
+      bestChoice = {
+        score,
+        finalState: result.finalState,
+        firstAction: depth === 0 ? action : result.firstAction || action,
+        safe: result.safe,
+      };
+    }
+  }
+
+  if (bestChoice) {
+    return bestChoice;
+  }
+
+  return {
+    score: -1_000_000,
+    finalState: state,
+    firstAction: null,
+    safe: !botStartsInCheck,
+  };
+}
+
+function runBotTurn(state) {
+  const workingState = cloneGameState(state);
+  const decision = chooseBotTurn(workingState);
+  if (!decision.firstAction) {
+    return resignGame(workingState, BOT_COLOR);
+  }
+  return decision.finalState;
 }
 
 function ActionButton({ label, onClick, disabled = false, title, tone = "default" }) {
@@ -211,6 +423,7 @@ export default function GamePage() {
   const previousEventKeyRef = useRef(null);
   const eventToastTimeoutRef = useRef(null);
   const pendingConfirmTimeoutRef = useRef(null);
+  const botTurnTimeoutRef = useRef(null);
   const [nowTick, setNowTick] = useState(Date.now());
   const handledTurnTimeoutRef = useRef(null);
   const handledRematchTimeoutRef = useRef(null);
@@ -332,6 +545,9 @@ export default function GamePage() {
       if (pendingConfirmTimeoutRef.current) {
         window.clearTimeout(pendingConfirmTimeoutRef.current);
       }
+      if (botTurnTimeoutRef.current) {
+        window.clearTimeout(botTurnTimeoutRef.current);
+      }
     },
     [],
   );
@@ -347,8 +563,9 @@ export default function GamePage() {
     () => playerSeat || detectPlayerColor(roomData, authUser),
     [playerSeat, roomData, authUser],
   );
-  const perspective = mode === "online" ? playerColor || "white" : "white";
-  const visibilityColor = mode === "online" ? playerColor || "white" : state.currentTurn;
+  const perspective = mode === "online" ? playerColor || "white" : HUMAN_BOT_COLOR;
+  const visibilityColor =
+    mode === "online" ? playerColor || "white" : mode === "bot" ? HUMAN_BOT_COLOR : state.currentTurn;
   const visibleSquares = useMemo(
     () => getVisibleSquares(state, visibilityColor),
     [state, visibilityColor],
@@ -357,14 +574,19 @@ export default function GamePage() {
   const moveTargets = selectedPieceId && !abilityMode ? getLegalMoves(state, selectedPieceId) : [];
   const abilityTargets = selectedPieceId && abilityMode ? getAbilityTargets(state, selectedPieceId) : [];
   const abilityReady = selectedPieceId ? canUseAbility(state, selectedPieceId) : false;
-  const canInteract = mode === "local" || (playerColor && playerColor === state.currentTurn && !state.winner);
+  const canInteract = Boolean(
+    !state.winner &&
+      (mode === "local" ||
+        (mode === "bot" && state.currentTurn === HUMAN_BOT_COLOR) ||
+        (playerColor && playerColor === state.currentTurn)),
+  );
   const onlineGameReady =
     mode === "online" &&
     Boolean(roomCode) &&
     Boolean(roomData?.players?.white) &&
     Boolean(roomData?.players?.black);
-  const showBoard = (mode === "local" && localGameStarted) || onlineGameReady;
-  const actorColor = mode === "online" ? playerColor : state.currentTurn;
+  const showBoard = ((mode === "local" || mode === "bot") && localGameStarted) || onlineGameReady;
+  const actorColor = mode === "online" ? playerColor : mode === "bot" ? HUMAN_BOT_COLOR : state.currentTurn;
   const abilityCooldown = selectedPiece ? state.cooldowns[selectedPiece.color][selectedPiece.type] : 0;
   const abilityIcon = selectedPiece ? ABILITY_IMAGE_ASSETS[selectedPiece.type] : null;
   const abilityDescription = selectedPiece ? t(`abilityGuide_${selectedPiece.type}`) : "";
@@ -388,6 +610,35 @@ export default function GamePage() {
   const turnDeadlineAt = !state.winner && state.turnStartedAt ? state.turnStartedAt + TURN_TIMEOUT_MS : null;
   const turnTimeLeftMs = turnDeadlineAt ? Math.max(0, turnDeadlineAt - nowTick) : 0;
   const turnTimerText = turnDeadlineAt ? formatCountdown(turnTimeLeftMs) : "";
+
+  useEffect(() => {
+    if (botTurnTimeoutRef.current) {
+      window.clearTimeout(botTurnTimeoutRef.current);
+      botTurnTimeoutRef.current = null;
+    }
+    if (
+      mode !== "bot" ||
+      !localGameStarted ||
+      state.winner ||
+      state.currentTurn !== BOT_COLOR ||
+      (state.pendingPromotion && state.pendingPromotion.color !== BOT_COLOR)
+    ) {
+      return undefined;
+    }
+
+    botTurnTimeoutRef.current = window.setTimeout(() => {
+      const nextState = runBotTurn(state);
+      void commitState(nextState);
+      botTurnTimeoutRef.current = null;
+    }, 520);
+
+    return () => {
+      if (botTurnTimeoutRef.current) {
+        window.clearTimeout(botTurnTimeoutRef.current);
+        botTurnTimeoutRef.current = null;
+      }
+    };
+  }, [localGameStarted, mode, state]);
 
   useEffect(() => {
     if (!(mode === "online" && roomCode && state.winner && state.gameEndedAt)) {
@@ -469,6 +720,12 @@ export default function GamePage() {
       setMenuTab("local");
       return;
     }
+    if (nextMode === "bot") {
+      setLocalGameStarted(false);
+      setMode("bot");
+      setMenuTab("bot");
+      return;
+    }
     setMode("online");
     setMenuTab("online");
     setLocalGameStarted(false);
@@ -544,6 +801,16 @@ export default function GamePage() {
     clearSelection();
     setMode("local");
     setMenuTab("local");
+    setState(createInitialState());
+    setLocalHistory([]);
+    setLocalGameStarted(true);
+    setStatusMessage("");
+  }
+
+  function startBotMatch() {
+    clearSelection();
+    setMode("bot");
+    setMenuTab("bot");
     setState(createInitialState());
     setLocalHistory([]);
     setLocalGameStarted(true);
@@ -664,7 +931,7 @@ export default function GamePage() {
     clearSelection();
     setEventToast(null);
     clearPendingConfirm();
-    if (mode === "local") {
+    if (mode === "local" || mode === "bot") {
       const nextState = createInitialState();
       setLocalHistory([]);
       setLocalGameStarted(true);
@@ -682,6 +949,8 @@ export default function GamePage() {
       : t("winnerTitle", { winner: t(state.winner || "white") });
   const inGameStatus = pendingDrawFromOpponent
     ? t("drawOffered", { color: t(state.drawOfferBy) })
+    : mode === "bot" && state.currentTurn === BOT_COLOR && !state.winner
+      ? t("botThinking")
     : waitingForOpponent
       ? t("waitingForOpponent", { code: roomCode })
       : "";
@@ -689,8 +958,8 @@ export default function GamePage() {
     mode === "online" ? (playerRematchVoted ? t("rematchVoted") : t("voteRematch")) : t("rematch");
   const rematchHint =
     mode === "online" && state.winner && rematchVotesCount > 0 ? t("rematchPending") : "";
-  const whitePlayerName = roomData?.players?.white?.name || t("white");
-  const blackPlayerName = roomData?.players?.black?.name || t("black");
+  const whitePlayerName = mode === "bot" ? t("youLabel") : roomData?.players?.white?.name || t("white");
+  const blackPlayerName = mode === "bot" ? t("botName") : roomData?.players?.black?.name || t("black");
   const opponentLeftLobby = Boolean(state.winner && opponentLeftAfterGame);
   const drawButtonLabel =
     pendingActionConfirm === "draw"
@@ -726,6 +995,16 @@ export default function GamePage() {
                 }}
               >
                 {t("local")}
+              </button>
+              <button
+                type="button"
+                className={menuTab === "bot" ? "tab active" : "tab"}
+                onClick={() => {
+                  setMenuTab("bot");
+                  setMode("bot");
+                }}
+              >
+                {t("botMode")}
               </button>
               <button
                 type="button"
@@ -779,6 +1058,14 @@ export default function GamePage() {
                     {t("startLocalMatch")}
                   </button>
                 </>
+              ) : mode === "bot" ? (
+                <>
+                  <h2>{t("botModeTitle")}</h2>
+                  <p>{t("botModeHint")}</p>
+                  <button type="button" className="primary-button" onClick={startBotMatch}>
+                    {t("startBotMatch")}
+                  </button>
+                </>
               ) : waitingForOpponent ? (
                 <>
                   <h2>{t("onlineMultiplayer")}</h2>
@@ -806,7 +1093,7 @@ export default function GamePage() {
       ) : (
         <main className="game-screen">
           {eventToast ? (
-            <div className="event-toast-overlay">
+            <div className="event-banner">
               <div className="event-toast">
                 <p className="event-toast-title">{eventToast.title}</p>
                 <p className="event-toast-description">{eventToast.description}</p>
@@ -848,7 +1135,7 @@ export default function GamePage() {
               <ActionButton
                 label={drawButtonLabel}
                 onClick={handleDrawAction}
-                disabled={!actorColor || Boolean(state.winner)}
+                disabled={!actorColor || Boolean(state.winner) || mode === "bot"}
               />
               <ActionButton
                 label={resignButtonLabel}
@@ -864,7 +1151,7 @@ export default function GamePage() {
             <Board
               state={state}
               perspective={perspective}
-              viewerColor={mode === "online" ? playerColor : null}
+              viewerColor={mode === "online" ? playerColor : mode === "bot" ? HUMAN_BOT_COLOR : null}
               revealAllState={false}
               selectedPieceId={selectedPieceId}
               lastMoveSquares={lastMoveSquares}
