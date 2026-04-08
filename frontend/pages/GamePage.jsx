@@ -367,6 +367,7 @@ export default function GamePage() {
   const actorColor = mode === "online" ? playerColor : state.currentTurn;
   const abilityCooldown = selectedPiece ? state.cooldowns[selectedPiece.color][selectedPiece.type] : 0;
   const abilityIcon = selectedPiece ? ABILITY_IMAGE_ASSETS[selectedPiece.type] : null;
+  const abilityDescription = selectedPiece ? t(`abilityGuide_${selectedPiece.type}`) : "";
   const waitingForOpponent = mode === "online" && roomCode && !onlineGameReady;
   const pendingDrawFromOpponent = Boolean(
     actorColor && state.drawOfferBy && state.drawOfferBy !== actorColor,
@@ -863,6 +864,8 @@ export default function GamePage() {
             <Board
               state={state}
               perspective={perspective}
+              viewerColor={mode === "online" ? playerColor : null}
+              revealAllState={false}
               selectedPieceId={selectedPieceId}
               lastMoveSquares={lastMoveSquares}
               moveTargets={moveTargets}
@@ -897,6 +900,8 @@ export default function GamePage() {
               {mode === "online" && state.winner && rematchVotesCount > 0 ? (
                 <div className="side-note">{`${rematchVotesCount}/2`}</div>
               ) : null}
+
+              {selectedPiece ? <div className="ability-copy">{abilityDescription}</div> : null}
 
               {state.pendingAbility?.type === "knight" ? (
                 <div className="ability-hint">{t("knightAbilityHint")}</div>

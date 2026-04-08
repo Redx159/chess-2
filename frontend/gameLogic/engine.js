@@ -544,7 +544,8 @@ export function getAbilityTargets(state, pieceId) {
         continue;
       }
       const occupant = getPieceAt(state.board, target);
-      if (!occupant || occupant.color !== piece.color || getPieceAt(state.board, landing)) {
+      const canPushThisAlly = occupant && occupant.color === piece.color;
+      if (!canPushThisAlly || getPieceAt(state.board, landing)) {
         continue;
       }
       targets.push({ ...target, kind: "push", end: landing });

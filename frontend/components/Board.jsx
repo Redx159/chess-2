@@ -14,6 +14,7 @@ function Square({
   isVisible,
   isEventTile,
   cooldown,
+  showPrivateState,
   onClick,
 }) {
   const classes = [
@@ -32,8 +33,16 @@ function Square({
 
   return (
     <button type="button" className={classes} onClick={() => onClick(square)}>
+      {isVisible && isMoveTarget ? (
+        <span className={`target-indicator move ${piece ? "occupied" : "empty"}`} />
+      ) : null}
+      {isVisible && isAbilityTarget ? (
+        <span className={`target-indicator ability ${piece ? "occupied" : "empty"}`} />
+      ) : null}
       {isVisible && piece ? (
-        <span className={`piece ${piece.color} ${piece.status.explosive ? "explosive" : ""}`}>
+        <span
+          className={`piece ${piece.color} ${showPrivateState && piece.status.explosive ? "explosive" : ""}`}
+        >
           <img
             className="piece-image"
             src={PIECE_IMAGE_ASSETS[piece.color][piece.type]}
@@ -44,7 +53,7 @@ function Square({
       ) : (
         <span className="piece-hidden" />
       )}
-      {isVisible && cooldown > 0 ? <span className="cooldown-badge">{cooldown}</span> : null}
+      {isVisible && showPrivateState && cooldown > 0 ? <span className="cooldown-badge">{cooldown}</span> : null}
     </button>
   );
 }
@@ -52,6 +61,8 @@ function Square({
 export default function Board({
   state,
   perspective,
+  viewerColor,
+  revealAllState = false,
   selectedPieceId,
   lastMoveSquares,
   moveTargets,
@@ -91,6 +102,9 @@ export default function Board({
             const cooldown = piece ? state.cooldowns[piece.color][piece.type] : 0;
             const isLastMoveFrom = lastMoveSquares?.from === key;
             const isLastMoveTo = lastMoveSquares?.to === key;
+            const showPrivateState = Boolean(
+              piece && (revealAllState || !viewerColor || piece.color === viewerColor),
+            );
 
             return (
               <Square
@@ -106,6 +120,7 @@ export default function Board({
                 isVisible={visible}
                 isEventTile={eventTiles.get(key)}
                 cooldown={cooldown}
+                showPrivateState={showPrivateState}
                 onClick={onSquareClick}
               />
             );

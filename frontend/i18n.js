@@ -100,7 +100,7 @@ export const translations = {
     abilityGuide_pawn:
       "Arm this pawn. If it gets captured while armed, it destroys the captor. After using this ability, you can still make your normal move.",
     abilityGuide_rook:
-      "Push an adjacent allied piece one square forward in the same direction, then move the rook into that piece's old square.",
+      "Push an adjacent allied piece one square in the same direction, then move the rook into that piece's old square.",
     abilityGuide_knight: "Make two consecutive knight jumps in the same turn.",
     abilityGuide_bishop: "Phase diagonally through one allied piece and keep moving on that line.",
     abilityGuide_queen: "Teleport to any empty square, or capture only if the target is on a normal queen line.",
