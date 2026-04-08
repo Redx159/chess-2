@@ -260,9 +260,44 @@ function chooseBotTurn(state, depth = 0) {
 function runBotTurn(state) {
   const workingState = cloneGameState(state);
   const decision = chooseBotTurn(workingState);
-  // Never let the bot resign automatically — return the simulated final
-  // state even when no firstAction was chosen.
-  return decision.finalState;
+
+  // Apply only the first chosen action from the decision to the real state.
+  // Returning the full simulated `finalState` could advance many plies
+  // (and create events like portals) in a single real turn — that caused
+  // the bot to teleport/promote/capture multiple times at once.
+  const action = decision.firstAction;
+  if (!action) {
+    // No immediate action chosen. Determine whether this is a genuine
+    // terminal condition (checkmate/stalemate) and return an appropriate
+    // terminal state so the UI stops showing "Bot is thinking...".
+    const possible = listBotActions(state);
+    if (!possible.length) {
+      // No legal moves for the bot: checkmate or stalemate.
+      if (isKingUnderThreat(state, BOT_COLOR)) {
+        // Checkmate: bot loses.
+        return resignGame(state, BOT_COLOR);
+      }
+      // Stalemate: declare draw.
+      const drawState = cloneGameState(state);
+      drawState.winner = "draw";
+      drawState.endReason = "draw";
+      drawState.gameEndedAt = Date.now();
+      drawState.lastAction = { type: "draw", description: "Draw by stalemate" };
+      drawState.moveHistory.push(drawState.lastAction.description);
+      return drawState;
+    }
+    // Otherwise, nothing immediate to apply — keep state unchanged.
+    return state;
+  }
+
+  // Simulate applying the single action to a fresh clone of the current state
+  // and auto-resolve a bot promotion to queen so the bot doesn't stall.
+  const startClone = cloneGameState(state);
+  const next = simulateBotAction(startClone, action);
+  if (next.pendingPromotion?.color === BOT_COLOR) {
+    return resolvePromotion(next, "queen");
+  }
+  return next;
 }
 
 function ActionButton({ label, onClick, disabled = false, title, tone = "default" }) {

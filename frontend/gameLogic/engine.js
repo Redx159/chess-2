@@ -219,7 +219,18 @@ function queuePromotionIfEligible(state, piece, position, defaultChoice = "queen
   if (!piece || piece.type !== "pawn") {
     return false;
   }
-  if (position.y !== 0 && position.y !== 7) {
+  // Pawns only promote when they reach the far rank for their color:
+  // - white pawns promote on y === 0
+  // - black pawns promote on y === 7
+  if (piece.color === "white") {
+    if (position.y !== 0) {
+      return false;
+    }
+  } else if (piece.color === "black") {
+    if (position.y !== 7) {
+      return false;
+    }
+  } else {
     return false;
   }
   state.pendingPromotion = {
