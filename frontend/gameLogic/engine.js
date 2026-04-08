@@ -367,27 +367,11 @@ function getPortalExit(event, position) {
   return null;
 }
 
-function isFogRulesDisabled(state) {
-  return state.activeEvent?.type === "fog";
-}
-
-function findKingPosition(board, color) {
-  for (let y = 0; y < BOARD_SIZE; y += 1) {
-    for (let x = 0; x < BOARD_SIZE; x += 1) {
-      const piece = board[y][x];
-      if (piece?.type === "king" && piece.color === color) {
-        return { x, y };
-      }
-    }
-  }
-  return null;
-}
-
 export function getPieceState(state, pieceId) {
   return findPiece(state.board, pieceId);
 }
 
-function getPseudoLegalMoves(state, pieceId) {
+export function getLegalMoves(state, pieceId) {
   if (state.winner || state.pendingPromotion || state.pendingAbility) {
     return [];
   }
@@ -497,7 +481,7 @@ function getPseudoLegalMoves(state, pieceId) {
   return uniqueBy(moves, toSquareKey);
 }
 
-function getPseudoAbilityTargets(state, pieceId) {
+export function getAbilityTargets(state, pieceId) {
   if (state.winner || state.pendingPromotion) {
     return [];
   }
@@ -622,47 +606,6 @@ function getPseudoAbilityTargets(state, pieceId) {
   return [];
 }
 
-function isSquareThreatenedByColor(state, square, attackerColor) {
-  for (const row of state.board) {
-    for (const piece of row) {
-      if (!piece || piece.color !== attackerColor || piece.status.stunned > 0 || piece.status.frozen > 0) {
-        continue;
-      }
-      const pseudoState = { ...state, currentTurn: attackerColor };
-      const moves = getPseudoLegalMoves(pseudoState, piece.id);
-      if (moves.some((move) => move.x === square.x && move.y === square.y)) {
-        return true;
-      }
-      const abilities = getPseudoAbilityTargets(pseudoState, piece.id);
-      if (
-        abilities.some((target) => {
-          if (target.x !== square.x || target.y !== square.y) {
-            return false;
-          }
-          if (piece.type === "bishop" || piece.type === "knight") {
-            return true;
-          }
-          return piece.type === "queen" && target.kind === "capture";
-        })
-      ) {
-        return true;
-      }
-    }
-  }
-  return false;
-}
-
-function isKingUnderThreat(state, color) {
-  if (isFogRulesDisabled(state)) {
-    return false;
-  }
-  const kingSquare = findKingPosition(state.board, color);
-  if (!kingSquare) {
-    return true;
-  }
-  return isSquareThreatenedByColor(state, kingSquare, otherColor(color));
-}
-
 function maybeTeleport(state, finalPosition) {
   const exit = getPortalExit(state.activeEvent, finalPosition);
   if (!exit || getPieceAt(state.board, exit)) {
@@ -706,8 +649,8 @@ function handleExplosiveCaptureAt(state, attacker, destination) {
   return handleExplosiveCounter(state, attacker, destination);
 }
 
-function executeMoveUnchecked(state, pieceId, targetPosition, promotionChoice = "queen") {
-  const legalMoves = getPseudoLegalMoves(state, pieceId);
+export function applyMove(state, pieceId, targetPosition, promotionChoice = "queen") {
+  const legalMoves = getLegalMoves(state, pieceId);
   const move = legalMoves.find((option) => option.x === targetPosition.x && option.y === targetPosition.y);
   if (!move) {
     return state;
@@ -790,107 +733,6 @@ function executeMoveUnchecked(state, pieceId, targetPosition, promotionChoice = 
   });
 }
 
-function canCurrentPlayerEscapeThreat(state) {
-  if (isFogRulesDisabled(state) || !isKingUnderThreat(state, state.currentTurn)) {
-    return true;
-  }
-
-  for (const row of state.board) {
-    for (const piece of row) {
-      if (!piece || piece.color !== state.currentTurn) {
-        continue;
-      }
-      const moves = getLegalMoves(state, piece.id);
-      if (moves.length > 0) {
-        return true;
-      }
-      const abilities = getAbilityTargets(state, piece.id);
-      if (abilities.length > 0) {
-        return true;
-      }
-    }
-  }
-  return false;
-}
-
-function resolveCheckmateOrStalemate(state) {
-  if (state.winner || isFogRulesDisabled(state)) {
-    return state;
-  }
-  if (canCurrentPlayerEscapeThreat(state)) {
-    return state;
-  }
-  if (isKingUnderThreat(state, state.currentTurn)) {
-    state.winner = otherColor(state.currentTurn);
-    state.endReason = "checkmate";
-    state.gameEndedAt = state.gameEndedAt || Date.now();
-    return state;
-  }
-  state.winner = "draw";
-  state.endReason = "draw";
-  state.gameEndedAt = state.gameEndedAt || Date.now();
-  return state;
-}
-
-function wouldKingBeSafeAfterMove(state, pieceId, move) {
-  if (isFogRulesDisabled(state)) {
-    return true;
-  }
-  const pieceState = findPiece(state.board, pieceId);
-  if (!pieceState) {
-    return false;
-  }
-  if (
-    pieceState.piece.type === "king" &&
-    Math.abs(move.x - pieceState.position.x) === 2 &&
-    isKingUnderThreat(state, pieceState.piece.color)
-  ) {
-    return false;
-  }
-
-  if (pieceState.piece.type === "king" && Math.abs(move.x - pieceState.position.x) === 2) {
-    const direction = move.x > pieceState.position.x ? 1 : -1;
-    const intermediate = { x: pieceState.position.x + direction, y: pieceState.position.y };
-    const intermediateState = executeMoveUnchecked(state, pieceId, intermediate);
-    if (intermediateState === state || isKingUnderThreat(intermediateState, pieceState.piece.color)) {
-      return false;
-    }
-  }
-
-  const next = executeMoveUnchecked(state, pieceId, move);
-  if (next === state) {
-    return false;
-  }
-  return !isKingUnderThreat(next, pieceState.piece.color);
-}
-
-export function getLegalMoves(state, pieceId) {
-  const pseudoMoves = getPseudoLegalMoves(state, pieceId);
-  if (isFogRulesDisabled(state)) {
-    return pseudoMoves;
-  }
-  return pseudoMoves.filter((move) => {
-    const occupant = getPieceAt(state.board, move);
-    if (occupant?.type === "king" && occupant.color !== state.currentTurn) {
-      return false;
-    }
-    return wouldKingBeSafeAfterMove(state, pieceId, move);
-  });
-}
-
-export function applyMove(state, pieceId, targetPosition, promotionChoice = "queen") {
-  const legalMoves = getLegalMoves(state, pieceId);
-  const move = legalMoves.find((option) => option.x === targetPosition.x && option.y === targetPosition.y);
-  if (!move) {
-    return state;
-  }
-  const next = executeMoveUnchecked(state, pieceId, move, promotionChoice);
-  if (next.pendingPromotion || next.currentTurn === state.currentTurn) {
-    return next;
-  }
-  return resolveCheckmateOrStalemate(next);
-}
-
 export function resolvePromotion(state, choice) {
   if (!state.pendingPromotion) {
     return state;
@@ -904,13 +746,12 @@ export function resolvePromotion(state, choice) {
   }
   piece.type = choice || defaultChoice || "queen";
   next.pendingPromotion = null;
-  const promoted = finishTurn(next, {
+  return finishTurn(next, {
     type: "promotion",
     pieceId,
     to: position,
     description: `${piece.color} pawn promoted to ${piece.type}`,
   });
-  return resolveCheckmateOrStalemate(promoted);
 }
 
 export function cloneGameState(state) {
@@ -974,8 +815,8 @@ export function offerOrAcceptDraw(state, color) {
   return next;
 }
 
-function executeAbilityUnchecked(state, pieceId, target) {
-  const options = getPseudoAbilityTargets(state, pieceId);
+export function applyAbility(state, pieceId, target) {
+  const options = getAbilityTargets(state, pieceId);
   const choice = options.find((option) => option.x === target.x && option.y === target.y);
   if (!choice) {
     return state;
@@ -1154,77 +995,6 @@ function executeAbilityUnchecked(state, pieceId, target) {
   }
 
   return state;
-}
-
-function canCurrentPlayerEventuallyEscape(state) {
-  if (isFogRulesDisabled(state) || !isKingUnderThreat(state, state.currentTurn)) {
-    return true;
-  }
-
-  if (state.pendingAbility?.type === "knight") {
-    const secondJumpTargets = getPseudoAbilityTargets(state, state.pendingAbility.pieceId);
-    return secondJumpTargets.some((target) => {
-      const next = executeAbilityUnchecked(state, state.pendingAbility.pieceId, target);
-      return next !== state && !isKingUnderThreat(next, state.currentTurn);
-    });
-  }
-
-  for (const row of state.board) {
-    for (const piece of row) {
-      if (!piece || piece.color !== state.currentTurn) {
-        continue;
-      }
-      if (getLegalMoves(state, piece.id).length > 0) {
-        return true;
-      }
-    }
-  }
-  return false;
-}
-
-function wouldKingBeSafeAfterAbility(state, pieceId, target) {
-  if (isFogRulesDisabled(state)) {
-    return true;
-  }
-  const pieceState = findPiece(state.board, pieceId);
-  if (!pieceState) {
-    return false;
-  }
-  const next = executeAbilityUnchecked(state, pieceId, target);
-  if (next === state) {
-    return false;
-  }
-  if (next.currentTurn !== state.currentTurn) {
-    return !isKingUnderThreat(next, pieceState.piece.color);
-  }
-  return canCurrentPlayerEventuallyEscape(next);
-}
-
-export function getAbilityTargets(state, pieceId) {
-  const pseudoTargets = getPseudoAbilityTargets(state, pieceId);
-  if (isFogRulesDisabled(state)) {
-    return pseudoTargets;
-  }
-  return pseudoTargets.filter((target) => {
-    const occupant = getPieceAt(state.board, target);
-    if (occupant?.type === "king" && occupant.color !== state.currentTurn) {
-      return false;
-    }
-    return wouldKingBeSafeAfterAbility(state, pieceId, target);
-  });
-}
-
-export function applyAbility(state, pieceId, target) {
-  const options = getAbilityTargets(state, pieceId);
-  const choice = options.find((option) => option.x === target.x && option.y === target.y);
-  if (!choice) {
-    return state;
-  }
-  const next = executeAbilityUnchecked(state, pieceId, choice);
-  if (next === state || next.currentTurn === state.currentTurn) {
-    return next;
-  }
-  return resolveCheckmateOrStalemate(next);
 }
 
 export function getVisibleSquares(state, color) {

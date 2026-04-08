@@ -344,9 +344,6 @@ function eventMessageFor(t, event) {
 }
 
 function resultDescription(t, state) {
-  if (state.endReason === "checkmate") {
-    return t("resultByCheckmate");
-  }
   if (state.endReason === "resign") {
     const loser = state.winner === "white" ? t("black") : t("white");
     return t("resultByResign", { loser });
