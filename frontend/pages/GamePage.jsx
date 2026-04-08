@@ -260,9 +260,8 @@ function chooseBotTurn(state, depth = 0) {
 function runBotTurn(state) {
   const workingState = cloneGameState(state);
   const decision = chooseBotTurn(workingState);
-  if (!decision.firstAction) {
-    return resignGame(workingState, BOT_COLOR);
-  }
+  // Never let the bot resign automatically — return the simulated final
+  // state even when no firstAction was chosen.
   return decision.finalState;
 }
 
