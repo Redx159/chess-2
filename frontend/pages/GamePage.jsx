@@ -267,27 +267,27 @@ function runBotTurn(state) {
   // the bot to teleport/promote/capture multiple times at once.
   const action = decision.firstAction;
   if (!action) {
-    // No immediate action chosen. Determine whether this is a genuine
-    // terminal condition (checkmate/stalemate) and return an appropriate
-    // terminal state so the UI stops showing "Bot is thinking...".
+    // No immediate action chosen by the search. Try to pick any legal
+    // action (fallback) so the bot keeps playing instead of resigning.
     const possible = listBotActions(state);
     if (!possible.length) {
-      // No legal moves for the bot: checkmate or stalemate.
-      if (isKingUnderThreat(state, BOT_COLOR)) {
-        // Checkmate: bot loses.
-        return resignGame(state, BOT_COLOR);
-      }
-      // Stalemate: declare draw.
-      const drawState = cloneGameState(state);
-      drawState.winner = "draw";
-      drawState.endReason = "draw";
-      drawState.gameEndedAt = Date.now();
-      drawState.lastAction = { type: "draw", description: "Draw by stalemate" };
-      drawState.moveHistory.push(drawState.lastAction.description);
-      return drawState;
+      // No legal moves available. Per requested rules, do not auto-resign
+      // or declare draw here; return unchanged state so the caller can
+      // handle timeouts or other policies.
+      return state;
     }
-    // Otherwise, nothing immediate to apply — keep state unchanged.
-    return state;
+
+    // Pick a simple fallback action (random) and apply it.
+    const fallback = randomItem(possible);
+    if (!fallback) {
+      return state;
+    }
+    const fallbackClone = cloneGameState(state);
+    const fallbackNext = simulateBotAction(fallbackClone, fallback);
+    if (fallbackNext.pendingPromotion?.color === BOT_COLOR) {
+      return resolvePromotion(fallbackNext, "queen");
+    }
+    return fallbackNext;
   }
 
   // Simulate applying the single action to a fresh clone of the current state
