@@ -548,18 +548,40 @@ export function getAbilityTargets(state, pieceId) {
 
   if (piece.type === "rook") {
     const targets = [];
+    // scan along each rook direction: find the first piece in that line
+    // if it's an allied piece reachable (no blockers between rook and that piece)
+    // allow pushing that allied piece to any empty square further along the same line
     for (const [dx, dy] of DIRECTIONS.rook) {
-      const target = { x: position.x + dx, y: position.y + dy };
-      const landing = { x: target.x + dx, y: target.y + dy };
-      if (!inBounds(target.x, target.y) || !inBounds(landing.x, landing.y)) {
-        continue;
+      let sx = position.x + dx;
+      let sy = position.y + dy;
+      while (inBounds(sx, sy)) {
+        const encountered = getPieceAt(state.board, { x: sx, y: sy });
+        if (!encountered) {
+          // empty square between rook and potential target; keep scanning
+          sx += dx;
+          sy += dy;
+          continue;
+        }
+
+        // encountered a piece — if it's an ally, it's a valid origin to push
+        if (encountered.color === piece.color) {
+          // compute possible landing squares beyond the allied piece
+          let lx = sx + dx;
+          let ly = sy + dy;
+          while (inBounds(lx, ly)) {
+            // stop if blocked by any piece (cannot land on occupied square)
+            if (getPieceAt(state.board, { x: lx, y: ly })) {
+              break;
+            }
+            targets.push({ x: lx, y: ly, kind: "push", origin: { x: sx, y: sy } });
+            lx += dx;
+            ly += dy;
+          }
+        }
+
+        // stop scanning this direction after the first piece is encountered
+        break;
       }
-      const occupant = getPieceAt(state.board, target);
-      const canPushThisAlly = occupant && occupant.color === piece.color;
-      if (!canPushThisAlly || getPieceAt(state.board, landing)) {
-        continue;
-      }
-      targets.push({ ...target, kind: "push", end: landing });
     }
     return targets;
   }
@@ -872,30 +894,47 @@ export function applyAbility(state, pieceId, target) {
   }
 
   if (piece.type === "rook") {
-    const ally = getPieceAt(next.board, target);
-    setPieceAt(next.board, position, null);
-    setPieceAt(next.board, target, null);
-    if (ally) {
-      ally.hasMoved = true;
+    // choice.x/choice.y is the chosen landing; choice.origin is the allied piece's square
+    const origin = choice.origin;
+    const ally = getPieceAt(next.board, origin);
+    if (!ally) {
+      return state;
     }
-    setPieceAt(next.board, choice.end, ally);
+
+    // remove rook from its original square and the ally from its origin
+    setPieceAt(next.board, position, null);
+    setPieceAt(next.board, origin, null);
+
+    // place the ally at the chosen landing
+    const landing = { x: choice.x, y: choice.y };
+    ally.hasMoved = true;
+    setPieceAt(next.board, landing, ally);
+
+    // compute square immediately before the landing (one step back toward the rook)
+    const dx = Math.sign(landing.x - origin.x);
+    const dy = Math.sign(landing.y - origin.y);
+    const rookLanding = { x: landing.x - dx, y: landing.y - dy };
+
+    // place the rook so it ends adjacent to the pushed piece
     piece.hasMoved = true;
-    setPieceAt(next.board, target, piece);
-    if (ally && queuePromotionIfEligible(next, ally, choice.end)) {
+    setPieceAt(next.board, rookLanding, piece);
+
+    if (ally && queuePromotionIfEligible(next, ally, landing)) {
       next.lastAction = {
         type: "ability",
         pieceId,
         from: position,
-        to: choice.end,
+        to: landing,
         description: `${piece.color} rook pushed a pawn into promotion`,
       };
       return next;
     }
+
     return finishTurn(next, {
       type: "ability",
       pieceId,
       from: position,
-      to: target,
+      to: rookLanding,
       description: `${piece.color} rook repositioned an ally`,
     });
   }

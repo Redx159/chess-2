@@ -72,11 +72,11 @@ export const ABILITY_IMAGE_ASSETS = {
 
 export const ABILITY_COOLDOWNS = {
   pawn: 2,
-  knight: 3,
-  bishop: 3,
-  rook: 4,
-  queen: 5,
-  king: 5,
+  knight: 5,
+  bishop: 4,
+  rook: 3,
+  queen: 7,
+  king: 6,
 };
 
 export const ABILITY_DESCRIPTIONS = {
