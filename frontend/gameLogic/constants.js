@@ -74,7 +74,7 @@ export const ABILITY_COOLDOWNS = {
   pawn: 2,
   knight: 5,
   bishop: 4,
-  rook: 3,
+  rook: 4,
   queen: 7,
   king: 6,
 };
