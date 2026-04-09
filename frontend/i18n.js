@@ -107,7 +107,7 @@ export const translations = {
     abilityGuide_pawn:
       "Arm this pawn. If it gets captured while armed, it destroys the captor. After using this ability, you can still make your normal move.",
     abilityGuide_rook:
-      "Push an adjacent allied piece one square in the same direction, then move the rook into that piece's old square.",
+      "Push an allied piece.",
     abilityGuide_knight: "Make two consecutive knight jumps in the same turn.",
     abilityGuide_bishop: "Phase diagonally through one allied piece and keep moving on that line.",
     abilityGuide_queen: "Teleport to any empty square, or capture only if the target is on a normal queen line.",
@@ -223,7 +223,7 @@ export const translations = {
     abilityGuide_pawn:
       "Arme ce pion. S'il se fait capturer pendant qu'il est arme, il detruit la piece qui le capture. Apres cette capacite, vous pouvez encore jouer votre coup normal.",
     abilityGuide_rook:
-      "Pousse une piece alliee adjacente d'une case dans la meme direction, puis la tour prend l'ancienne case de cette piece.",
+      "Pousse une pièce alliée.",
     abilityGuide_knight: "Effectue deux sauts de cavalier consecutifs pendant le meme tour.",
     abilityGuide_bishop: "Traverse en diagonale une piece alliee puis continue sur cette ligne.",
     abilityGuide_queen: "Se teleporte sur n'importe quelle case vide, ou capture seulement sur une ligne normale de dame.",

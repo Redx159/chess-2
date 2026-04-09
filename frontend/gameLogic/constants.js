@@ -83,7 +83,7 @@ export const ABILITY_DESCRIPTIONS = {
   pawn: "Arm this pawn. It cannot move on its next turn and destroys its captor if captured while armed.",
   knight: "Make two consecutive knight moves in one turn.",
   bishop: "Move diagonally while phasing through one allied piece.",
-  rook: "Push an adjacent allied piece one tile and move the rook into that piece's previous square.",
+  rook: "Push ally piece.",
   queen: "Teleport to any empty square, or capture only along a normal queen line.",
   king: "Stun any enemy piece for its next turn.",
 };
