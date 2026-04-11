@@ -75,6 +75,15 @@ function randomItem(items) {
   return items[Math.floor(Math.random() * items.length)];
 }
 
+function shuffled(items) {
+  const next = [...items];
+  for (let index = next.length - 1; index > 0; index -= 1) {
+    const swapIndex = Math.floor(Math.random() * (index + 1));
+    [next[index], next[swapIndex]] = [next[swapIndex], next[index]];
+  }
+  return next;
+}
+
 const BOT_PIECE_VALUES = {
   pawn: 100,
   knight: 320,
@@ -607,6 +616,16 @@ export default function GamePage() {
   const selectedPiece = selectedPieceId ? getPieceState(state, selectedPieceId)?.piece : null;
   const moveTargets = selectedPieceId && !abilityMode ? getLegalMoves(state, selectedPieceId) : [];
   const abilityTargets = selectedPieceId && abilityMode ? getAbilityTargets(state, selectedPieceId) : [];
+  const boardVisibleSquares = useMemo(() => {
+    const nextVisible = new Set(visibleSquares);
+    for (const move of moveTargets) {
+      nextVisible.add(toSquareKey(move));
+    }
+    for (const target of abilityTargets) {
+      nextVisible.add(toSquareKey(target));
+    }
+    return nextVisible;
+  }, [abilityTargets, moveTargets, visibleSquares]);
   const abilityReady = selectedPieceId ? canUseAbility(state, selectedPieceId) : false;
   const canInteract = Boolean(
     !state.winner &&
@@ -1191,7 +1210,7 @@ export default function GamePage() {
               lastMoveSquares={lastMoveSquares}
               moveTargets={moveTargets}
               abilityTargets={abilityTargets}
-              visibleSquares={visibleSquares}
+              visibleSquares={boardVisibleSquares}
               onSquareClick={handleSquareClick}
             />
             </div>
