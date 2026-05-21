@@ -675,6 +675,9 @@ function handleExplosiveCounter(state, attacker, destination) {
   }
   setPieceAt(state.board, destination, null);
   removePieceById(state.board, attacker.id);
+  if (attacker.type === "king") {
+    state.winner = target.color;
+  }
   return true;
 }
 
